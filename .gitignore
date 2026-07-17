@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs / editors
+.idea/
+.vscode/
+*.iml
+
+# PHP / Composer (Medoo is provided by SwiftyEdit core, not bundled here)
+/vendor/
+
+# Runtime database (created on first install; /data/ itself must stay
+# so PDO has a directory to write former.sqlite3 into)
+/data/*.sqlite3
+/data/*.sqlite
+
+# User-uploaded form files (created at runtime by the installer/writer)
+/uploads/*
+!/uploads/.gitkeep
+
+# Release build artifacts (attach to GitHub Releases instead of committing)
+/*.zip
+
+# Logs
+*.log
