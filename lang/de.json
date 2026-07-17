@@ -67,5 +67,14 @@
   "msg_saved": "Gespeichert.",
   "msg_deleted": "Gelöscht.",
   "msg_created": "Erstellt.",
-  "msg_error_generic": "Es ist ein Fehler aufgetreten."
+  "msg_error_generic": "Es ist ein Fehler aufgetreten.",
+  "field_type_text": "Text",
+  "field_type_textarea": "Textarea",
+  "field_type_email": "E-Mail",
+  "field_type_number": "Zahl",
+  "field_type_select": "Auswahlliste",
+  "field_type_radio": "Radiobuttons",
+  "field_type_checkbox": "Checkbox (Zustimmung)",
+  "field_type_file": "Datei-Upload",
+  "field_type_text_block": "Text / Erklärung"
 }

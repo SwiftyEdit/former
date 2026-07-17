@@ -67,5 +67,14 @@
   "msg_saved": "Saved.",
   "msg_deleted": "Deleted.",
   "msg_created": "Created.",
-  "msg_error_generic": "An error occurred."
+  "msg_error_generic": "An error occurred.",
+  "field_type_text": "Text",
+  "field_type_textarea": "Textarea",
+  "field_type_email": "E-mail",
+  "field_type_number": "Number",
+  "field_type_select": "Select list",
+  "field_type_radio": "Radio buttons",
+  "field_type_checkbox": "Checkbox (consent)",
+  "field_type_file": "File upload",
+  "field_type_text_block": "Text / explanation"
 }

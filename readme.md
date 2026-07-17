@@ -1,36 +1,35 @@
 # Former
 
-Erstellt beliebig viele Formulare per Drag & Drop.
+Build unlimited forms via drag & drop.
 
-## Einbindung
+## Usage
 
 ```
 [plugin=former]form_id=3[/plugin]
 ```
 
-Die Formular-ID steht in der Formular-Liste im Backend (Addons > Former).
+The form ID is shown in the form list in the backend (Addons > Former).
 
-## Funktionen
+## Features
 
-- Beliebig viele Formulare, per Drag & Drop aus Feld-Templates zusammengestellt
-- Feldtypen: Text, Textarea, E-Mail, Zahl, Auswahlliste, Radiobuttons, Checkbox, Datei-Upload,
-  sowie ein reiner Text-/Erklärungsblock ohne Eingabe (z.B. für längere Hinweistexte im Formular)
-- Pro Formular wählbar: Einsendungen in der Datenbank speichern und/oder per E-Mail an
-  ausgewählte Empfänger senden (oder beides)
-- Mehrere Empfänger lassen sich in den Plugin-Einstellungen hinterlegen; pro Formular
-  wird per Checkbox ausgewählt, wer benachrichtigt wird
-- Captcha: einfaches Rechen-Captcha (Standard) oder Google reCAPTCHA v2, umschaltbar in
-  den Plugin-Einstellungen
-- Datei-Uploads landen in einem eigenen Verzeichnis (`plugins/former/uploads/<form_id>/`)
-  und werden nicht in die zentrale Medienbibliothek übernommen, da Absender anonym sind
-- Absenden erfolgt per HTMX ohne Neuladen der Seite
+- Unlimited forms, assembled via drag & drop from field templates
+- Field types: text, textarea, email, number, select, radio buttons, checkbox, file upload,
+  plus a plain text/explanation block with no input (e.g. for longer instructions inside the form)
+- Configurable per form: store submissions in the database and/or send them by email to
+  selected recipients (or both)
+- Multiple recipients can be defined in the plugin settings; a checkbox per form controls
+  who gets notified
+- Captcha: simple math captcha (default) or Google reCAPTCHA v2, switchable in the plugin
+  settings
+- File uploads are stored in their own directory (`plugins/former/uploads/<form_id>/`) and
+  are not added to the central media library, since submitters are anonymous
+- Submission happens via HTMX without a page reload
 
-## Hinweis zur Aktivierung
+## Note on activation
 
-Der Shortcode rendert das Formular auch, wenn das Plugin nicht aktiviert ist. Das
-Absenden (`/xhr/plugins/former/`) funktioniert jedoch erst, nachdem das Plugin unter
-Addons aktiviert wurde.
+The shortcode renders the form even if the plugin is not activated. Submitting
+(`/xhr/plugins/former/`) only works once the plugin has been activated under Addons.
 
-## Lizenz
+## License
 
-GPL-3.0 — siehe [license.txt](license.txt).
+GPL-3.0 — see [license.txt](license.txt).

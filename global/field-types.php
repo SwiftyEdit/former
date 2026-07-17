@@ -9,65 +9,67 @@
  * this to map a field's field_type to its template file and config UI.
  */
 function fmr_field_types(): array {
+    global $addon_lang;
+
     return [
         'text' => [
-            'label' => 'Text',
+            'label' => $addon_lang['field_type_text'] ?? 'Text',
             'template' => 'text.tpl',
             'has_options' => false,
             'has_upload' => false,
             'config_fields' => [],
         ],
         'textarea' => [
-            'label' => 'Textarea',
+            'label' => $addon_lang['field_type_textarea'] ?? 'Textarea',
             'template' => 'textarea.tpl',
             'has_options' => false,
             'has_upload' => false,
             'config_fields' => ['rows'],
         ],
         'email' => [
-            'label' => 'E-Mail',
+            'label' => $addon_lang['field_type_email'] ?? 'E-mail',
             'template' => 'email.tpl',
             'has_options' => false,
             'has_upload' => false,
             'config_fields' => [],
         ],
         'number' => [
-            'label' => 'Zahl',
+            'label' => $addon_lang['field_type_number'] ?? 'Number',
             'template' => 'number.tpl',
             'has_options' => false,
             'has_upload' => false,
             'config_fields' => ['min', 'max'],
         ],
         'select' => [
-            'label' => 'Auswahlliste',
+            'label' => $addon_lang['field_type_select'] ?? 'Select list',
             'template' => 'select.tpl',
             'has_options' => true,
             'has_upload' => false,
             'config_fields' => ['options'],
         ],
         'radio' => [
-            'label' => 'Radiobuttons',
+            'label' => $addon_lang['field_type_radio'] ?? 'Radio buttons',
             'template' => 'radio.tpl',
             'has_options' => true,
             'has_upload' => false,
             'config_fields' => ['options'],
         ],
         'checkbox' => [
-            'label' => 'Checkbox (Zustimmung)',
+            'label' => $addon_lang['field_type_checkbox'] ?? 'Checkbox (consent)',
             'template' => 'checkbox.tpl',
             'has_options' => false,
             'has_upload' => false,
             'config_fields' => [],
         ],
         'file' => [
-            'label' => 'Datei-Upload',
+            'label' => $addon_lang['field_type_file'] ?? 'File upload',
             'template' => 'file.tpl',
             'has_options' => false,
             'has_upload' => true,
             'config_fields' => ['allowed_extensions', 'max_size_mb', 'multiple'],
         ],
         'text_block' => [
-            'label' => 'Text / Erklärung',
+            'label' => $addon_lang['field_type_text_block'] ?? 'Text / explanation',
             'template' => 'text_block.tpl',
             'has_options' => false,
             'has_upload' => false,
