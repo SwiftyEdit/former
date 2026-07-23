@@ -373,6 +373,22 @@ function fmr_render_field_row(array $field): string {
     $config = json_decode($field['config'] ?? '{}', true) ?: [];
 
     $html = '<div class="list-group-item draggable" data-id="'.$id.'">';
+    // Marker input, present from the first render of every field type (not
+    // just is_static rows, which already carry their own hidden
+    // field_label/field_key). The admin theme's shared picker JS
+    // (public/assets/themes/administration/.../backend.js,
+    // observeContainersForDraggableDivs()) auto-adds its own picker_N[]
+    // hidden input AND a client-side-only trash button to any .draggable
+    // row that has no <input type="hidden"> yet - meant for its generic
+    // image-picker use case, not for former's rows, which already have
+    // their own server-backed delete button below. That trash button only
+    // does `this.parentElement.remove()`, it never calls the server, so it
+    // would silently fail to delete the field while looking like it did.
+    // Having this marker present up front makes that check true immediately,
+    // so core never adds either element. Core JS is left untouched; see
+    // fmr_field_order in backend/form-editor.php for how order is tracked
+    // instead of the picker_N[] input core would otherwise have supplied.
+    $html .= '<input type="hidden" name="fmr_row_marker['.$id.']" value="1">';
     $html .= '<div class="d-flex justify-content-between align-items-center mb-2">';
     $html .= '<strong>'.htmlspecialchars($type['label']).'</strong>';
     $html .= '<button type="button" class="btn btn-sm btn-default text-danger"

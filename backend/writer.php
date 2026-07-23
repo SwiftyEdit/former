@@ -110,7 +110,10 @@ if (isset($_POST['delete_field'])) {
 
 if (isset($_POST['save_fields'])) {
     $form_id = (int) $_POST['save_fields'];
-    $order = $_POST['picker_0'] ?? [];
+    // fmr_field_order, not the admin theme's picker_0[] - see the
+    // MutationObserver in backend/form-editor.php for why.
+    $order_raw = $_POST['fmr_field_order'] ?? '';
+    $order = $order_raw !== '' ? explode(',', $order_raw) : [];
 
     $labels = $_POST['field_label'] ?? [];
     $keys = $_POST['field_key'] ?? [];
@@ -130,11 +133,11 @@ if (isset($_POST['save_fields'])) {
     $fields_by_id = array_column($fields, null, 'id');
 
     // Process every field belonging to this form, not just the ones
-    // present in picker_0[] - a field the Sortable/MutationObserver
-    // wiring hasn't (yet) assigned an ordering hidden-input to would
-    // otherwise be silently skipped and its edits (incl. a text_block's
-    // content) lost. picker_0[] still drives the order for fields it
-    // does list; anything missing from it is appended at the end.
+    // present in fmr_field_order - a field missing from it for any reason
+    // would otherwise be silently skipped and its edits (incl. a
+    // text_block's content) lost. fmr_field_order still drives the order
+    // for fields it does list; anything missing from it is appended at
+    // the end.
     $ordered_ids = array_map('intval', $order);
     $missing_ids = array_diff(array_map('intval', array_keys($fields_by_id)), $ordered_ids);
     $ordered_ids = array_merge($ordered_ids, $missing_ids);

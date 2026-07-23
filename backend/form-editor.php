@@ -77,6 +77,7 @@ echo '</div>';
 
 echo '<input type="hidden" name="save_fields" value="'.$form_id.'">';
 echo '<input type="hidden" name="csrf_token" value="'.$_SESSION['token'].'">';
+echo '<input type="hidden" name="fmr_field_order" id="fmrFieldOrder" value="">';
 echo '<button type="submit" class="btn btn-primary">'.$addon_lang['btn_save_fields'].'</button>';
 echo '</form>';
 echo '</div>';
@@ -85,3 +86,39 @@ echo '</div>';
 echo '</div>'; // col-md-8
 
 echo '</div>'; // row
+
+/*
+ * Own order tracking, deliberately NOT reusing the admin theme's shared
+ * picker_0[] mechanism (public/assets/themes/administration/src/js/backend.js,
+ * observeContainersForDraggableDivs()). That code only adds a row's
+ * picker_0[] hidden input when the row has no <input type="hidden"> at all
+ * yet - it can't tell "no order input yet" apart from "already has some
+ * other hidden input". A text_block row renders its own hidden
+ * field_label[id]/field_key[id] inputs (see fmr_render_field_row()), which
+ * trips that check immediately, so those rows never get a picker_0[] entry
+ * and silently keep their old position on save. Since that's core theme
+ * code, we work around it here instead of patching core: a single hidden
+ * input (#fmrFieldOrder) holding a comma-joined list of field ids in DOM
+ * order, recomputed from #formCanvas .draggable[data-id] on every mutation
+ * (drag-reorder via the theme's own SortableJS instance, or a field
+ * appended by "add_field"). backend/writer.php reads fmr_field_order
+ * instead of picker_0.
+ */
+echo '<script>
+(function() {
+    var canvas = document.getElementById("formCanvas");
+    var orderInput = document.getElementById("fmrFieldOrder");
+    if (!canvas || !orderInput) { return; }
+
+    function syncOrder() {
+        var ids = [];
+        canvas.querySelectorAll(":scope > .draggable[data-id]").forEach(function(el) {
+            ids.push(el.getAttribute("data-id"));
+        });
+        orderInput.value = ids.join(",");
+    }
+
+    new MutationObserver(syncOrder).observe(canvas, { childList: true, subtree: true });
+    syncOrder();
+})();
+</script>';
