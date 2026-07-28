@@ -1,10 +1,23 @@
 {
   "addon": {
+    "id": "former",
     "name": "Former",
+    "type": "plugin",
     "version": "1.0",
+    "build": 1,
     "author": "SwiftyEdit Developer Team",
-    "description": "Build unlimited forms via drag & drop, with database storage, email delivery, file upload and captcha protection."
+    "description": "Build unlimited forms via drag & drop, with database storage, email delivery, file upload and captcha protection.",
+    "database": "former.sqlite3",
+    "update_url": "https://raw.githubusercontent.com/SwiftyEdit/former/main/info.json"
   },
+  "versions": [
+    {
+      "version": "1.0",
+      "build": 1,
+      "requires_build": "26-0183",
+      "download_url": "https://github.com/SwiftyEdit/former/releases/download/v1.0/former-1.0.zip"
+    }
+  ],
   "navigation": [
     {
       "text": "nav_overview",
