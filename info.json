@@ -4,7 +4,7 @@
     "name": "Former",
     "type": "plugin",
     "version": "1.0.1",
-    "build": 1,
+    "build": 2,
     "author": "SwiftyEdit Developer Team",
     "description": "Build unlimited forms via drag & drop, with database storage, email delivery, file upload and captcha protection.",
     "database": "former.sqlite3",
