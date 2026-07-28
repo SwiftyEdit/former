@@ -11,6 +11,10 @@ include __DIR__.'/schema.php';
 
 if(!is_file("$former_db_file")) {
 
+    if(!is_dir(dirname($former_db_file))) {
+        mkdir(dirname($former_db_file), 0755, true);
+    }
+
     echo '<p class="alert alert-info">We try to generate SQLite File: '.$former_db_file.'</p>';
 
         // Medoo initialisieren
