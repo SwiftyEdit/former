@@ -7,6 +7,7 @@ return [
         'name' => 'VARCHAR(255) NOT NULL',
         'description' => 'TEXT NULL',
         'status' => 'TINYINT(1) DEFAULT 1',
+        'disable_captcha' => 'TINYINT(1) DEFAULT 0',
         'store_to_db' => 'TINYINT(1) DEFAULT 1',
         'send_mail' => 'TINYINT(1) DEFAULT 0',
         'mail_subject' => 'VARCHAR(255) NULL',

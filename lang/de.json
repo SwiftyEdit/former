@@ -19,6 +19,8 @@
   "title_form_settings": "Einstellungen",
   "label_description": "Beschreibung",
   "label_status": "Aktiv",
+  "label_disable_captcha": "Captcha für dieses Formular deaktivieren",
+  "hint_disable_captcha": "Z. B. sinnvoll bei Formularen, die nur angemeldete Benutzer sehen.",
   "label_store_to_db": "Einsendungen in der Datenbank speichern",
   "label_send_mail": "Einsendungen per E-Mail versenden",
   "label_mail_subject": "E-Mail-Betreff",

@@ -81,6 +81,10 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
     echo '<div class="mb-3 form-check"><input type="checkbox" class="form-check-input" name="status" value="1" id="fmr-status" '.($form['status'] ? 'checked' : '').'>';
     echo '<label class="form-check-label" for="fmr-status">'.$addon_lang['label_status'].'</label></div>';
 
+    echo '<div class="mb-3 form-check"><input type="checkbox" class="form-check-input" name="disable_captcha" value="1" id="fmr-disable-captcha" '.($form['disable_captcha'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-disable-captcha">'.$addon_lang['label_disable_captcha'].'</label>';
+    echo '<div class="form-text">'.$addon_lang['hint_disable_captcha'].'</div></div>';
+
     echo '<hr>';
 
     echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="store_to_db" value="1" id="fmr-store" '.($form['store_to_db'] ? 'checked' : '').'>';

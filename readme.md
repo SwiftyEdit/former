@@ -20,7 +20,8 @@ The form ID is shown in the form list in the backend (Addons > Former).
 - Multiple recipients can be defined in the plugin settings; a checkbox per form controls
   who gets notified
 - Captcha: simple math captcha (default) or Google reCAPTCHA v2, switchable in the plugin
-  settings
+  settings; the captcha can also be turned off per form (e.g. for forms only shown to
+  logged-in users)
 - File uploads are stored in their own directory (`plugins/former/uploads/<form_id>/`) and
   are not added to the central media library, since submitters are anonymous
 - Submission happens via HTMX without a page reload

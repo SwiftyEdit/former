@@ -48,6 +48,7 @@ if (isset($_POST['save_form_settings'])) {
         'name' => sanitizeUserInputs($_POST['name'] ?? ''),
         'description' => sanitizeUserInputs($_POST['description'] ?? ''),
         'status' => isset($_POST['status']) ? 1 : 0,
+        'disable_captcha' => isset($_POST['disable_captcha']) ? 1 : 0,
         'store_to_db' => isset($_POST['store_to_db']) ? 1 : 0,
         'send_mail' => isset($_POST['send_mail']) ? 1 : 0,
         'mail_subject' => sanitizeUserInputs($_POST['mail_subject'] ?? ''),

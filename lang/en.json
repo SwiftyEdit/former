@@ -19,6 +19,8 @@
   "title_form_settings": "Settings",
   "label_description": "Description",
   "label_status": "Active",
+  "label_disable_captcha": "Disable captcha for this form",
+  "hint_disable_captcha": "Useful e.g. for forms that are only shown to logged-in users.",
   "label_store_to_db": "Store submissions in the database",
   "label_send_mail": "Send submissions by e-mail",
   "label_mail_subject": "E-mail subject",

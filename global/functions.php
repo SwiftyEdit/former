@@ -320,7 +320,9 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
     }
 
     $fmr_settings = fmr_get_settings();
-    if (($fmr_settings['captcha_type'] ?? 'math') === 'recaptcha_v2') {
+    if (!empty($form['disable_captcha'])) {
+        $captcha_html = '';
+    } elseif (($fmr_settings['captcha_type'] ?? 'math') === 'recaptcha_v2') {
         $captcha_html = str_replace(
             '{site_key}',
             htmlspecialchars($fmr_settings['recaptcha_site_key'] ?? ''),

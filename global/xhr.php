@@ -77,7 +77,7 @@ $valid = ($_POST['csrf_token'] ?? '') === ($_SESSION['token'] ?? null)
 
 /* 2. Captcha ------------------------------------------------------------ */
 $fmr_settings = fmr_get_settings();
-if ($valid) {
+if ($valid && empty($form['disable_captcha'])) {
     if (($fmr_settings['captcha_type'] ?? 'math') === 'recaptcha_v2') {
         $valid = fmr_verify_recaptcha($_POST['g-recaptcha-response'] ?? '', $fmr_settings['recaptcha_secret_key'] ?? '');
     } else {
