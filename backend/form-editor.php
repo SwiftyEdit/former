@@ -47,6 +47,36 @@ echo '<form hx-post="/admin-xhr/addons/plugin/former/write/" hx-target="#formCan
 echo '<div id="formCanvasResponse"></div>';
 
 /*
+ * The admin theme's .sortable_target::after rule (public/assets/themes/
+ * administration/src/scss/_form.scss) always renders "DROP IMAGES HERE" -
+ * it's meant for the image picker, the other consumer of this shared
+ * Sortable component. #formCanvas needs the class for the Sortable wiring
+ * (see note below) but the wording is wrong here, so it's overridden with
+ * an id+class selector, which outweighs the theme's plain-class selector on
+ * specificity - no !important, no core file touched.
+ *
+ * The rows themselves reuse bootstrap's .list-group-item (see
+ * fmr_render_field_row()), which by design collapses adjacent items onto a
+ * shared 1px border (".list-group-item + .list-group-item { border-top-
+ * width: 0 }") - fine for a simple link list, but with former's multi-row
+ * field editors in each item, that shared line is too subtle to tell where
+ * one field ends and the next begins. Gapping and re-bordering each row
+ * fixes that; scoped to #formCanvas so it doesn't touch list-group items
+ * elsewhere. An id-qualified selector again outweighs the theme's
+ * class-only ones, so this stays override-only, no !important.
+ */
+echo '<style>
+#formCanvas.sortable_target::after { content: "'.htmlspecialchars($addon_lang['msg_canvas_dropzone']).'"; }
+#formCanvas.sortable_target > .draggable {
+    margin-bottom: 10px;
+    border: 1px solid var(--bs-border-color);
+    border-left: 2px solid var(--bs-primary);
+    border-radius: var(--bs-border-radius, .375rem);
+}
+#formCanvas.sortable_target > .draggable:last-child { margin-bottom: 0; }
+</style>';
+
+/*
  * The .sortable_target class must be present in the *initial* server-rendered
  * HTML, not injected later via an hx-get swap. The admin theme's global
  * SortableJS wiring (public/assets/themes/administration/src/js/backend.js)

@@ -211,11 +211,14 @@ if ($errors) {
 }
 
 /* 5. Persist (DB) --------------------------------------------------------- */
+$meta = fmr_build_submission_meta($form);
+
 $submission_id = null;
 if ((int) $form['store_to_db'] === 1) {
     $former_db->insert('submissions', [
         'form_id' => $form_id,
         'data' => json_encode($clean, JSON_UNESCAPED_UNICODE),
+        'meta' => $meta ? json_encode($meta, JSON_UNESCAPED_UNICODE) : null,
         'ip_address' => $_SERVER['REMOTE_ADDR'] ?? null,
         'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
     ]);
@@ -236,9 +239,31 @@ if ((int) $form['store_to_db'] === 1) {
 }
 
 /* 6. Respond to the visitor immediately, THEN send mail(s) --------------- */
+
+/* Frontend tracking hook: a `former:submitted` CustomEvent is dispatched
+ * (see templates/success.tpl) from an inline <script> in the swapped-in
+ * success markup, so it fires the moment htmx settles the response - no
+ * former JS of its own, purely a hook for the theme (or GTM, or a snippet
+ * in the page) to react to, e.g. firing a Google Ads conversion or a
+ * Salesforce Web-to-Lead call. Carries the same sanitized values already
+ * collected into $clean above (the visitor's own just-submitted data,
+ * returned to their own browser - no former-side network calls are made).
+ * JSON_HEX_* escaping makes it safe to embed inside a <script> block even
+ * if a submitted value contains "</script>" or HTML. `meta` carries
+ * whatever fmr_build_submission_meta() added per the form's "include_user_
+ * data" / "include_ip_referrer" checkboxes - empty object if neither is on. */
+$tracking_json = json_encode([
+    'form_id' => $form_id,
+    'form_name' => $form['name'],
+    'submission_id' => $submission_id,
+    'data' => $clean,
+    'meta' => $meta,
+], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+
 $success_tpl = file_get_contents(__DIR__.'/../templates/success.tpl');
 $success_tpl = str_replace('{form_id}', (string) $form_id, $success_tpl);
 $success_tpl = str_replace('{message}', htmlspecialchars($form['success_message'] ?: 'Vielen Dank für Ihre Nachricht!'), $success_tpl);
+$success_tpl = str_replace('{tracking_event_json}', $tracking_json, $success_tpl);
 echo $success_tpl;
 
 if ((int) $form['send_mail'] !== 1) {
@@ -287,6 +312,12 @@ foreach ($fields as $field) {
     }
     $v = $clean[$field['field_key']] ?? '';
     $body .= '<tr><td>'.htmlspecialchars($field['label']).'</td><td>'.htmlspecialchars(is_array($v) ? implode(', ', $v) : (string) $v).'</td></tr>';
+}
+if ($meta) {
+    $meta_labels = fmr_meta_labels();
+    foreach ($meta as $key => $value) {
+        $body .= '<tr><td>'.htmlspecialchars($meta_labels[$key] ?? $key).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
+    }
 }
 $body .= '</table>';
 

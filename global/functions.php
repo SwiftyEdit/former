@@ -120,6 +120,55 @@ function fmr_verify_recaptcha(string $response, string $secret): bool {
 }
 
 /* -------------------------------------------------------------------
+ * Auto-attached submission metadata (logged-in user / IP & referrer).
+ * Opt-in per form (see the two checkboxes in backend/reader.php's
+ * form_settings block), fixed set of keys by design - not user-
+ * configurable beyond on/off. Fed into all three sinks alike: the
+ * submissions table (own `meta` column), the notification mail, and the
+ * former:submitted JS event (see global/xhr.php).
+ * ---------------------------------------------------------------- */
+
+function fmr_build_submission_meta(array $form): array {
+    $meta = [];
+
+    // $_SESSION['user_id'] is the site-wide login (shared with the shop /
+    // profile area etc., not just backend admins) - see
+    // app/functions/functions.user.php::se_start_user_session(). Nothing
+    // is added if the visitor isn't logged in, even when the checkbox is on.
+    if (!empty($form['include_user_data']) && isset($_SESSION['user_id'])) {
+        $meta['user_id'] = (int) $_SESSION['user_id'];
+        $meta['user_nick'] = $_SESSION['user_nick'] ?? null;
+        $meta['user_mail'] = $_SESSION['user_mail'] ?? null;
+    }
+
+    if (!empty($form['include_ip_referrer'])) {
+        $meta['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? null;
+        // The Referer header on the POST itself - usually just the page the
+        // form lives on, not the original ad/landing-page source, once the
+        // visitor has navigated around the site first.
+        $meta['referrer'] = $_SERVER['HTTP_REFERER'] ?? null;
+    }
+
+    return $meta;
+}
+
+/**
+ * Display labels for fmr_build_submission_meta() keys, used by the
+ * submissions list (backend/reader.php) and the notification mail body.
+ */
+function fmr_meta_labels(): array {
+    global $addon_lang;
+
+    return [
+        'user_id' => $addon_lang['label_meta_user_id'] ?? 'User-ID',
+        'user_nick' => $addon_lang['label_meta_user_nick'] ?? 'Benutzername',
+        'user_mail' => $addon_lang['label_meta_user_mail'] ?? 'E-Mail (angemeldet)',
+        'ip_address' => $addon_lang['label_meta_ip_address'] ?? 'IP-Adresse',
+        'referrer' => $addon_lang['label_meta_referrer'] ?? 'Referrer',
+    ];
+}
+
+/* -------------------------------------------------------------------
  * Mail with attachments. se_send_mail() (app/functions/functions.php)
  * has no attachment support, so submissions with an uploaded file use
  * this local variant instead - it mirrors se_send_mail()'s SMTP setup
@@ -392,7 +441,10 @@ function fmr_render_field_row(array $field): string {
     // instead of the picker_N[] input core would otherwise have supplied.
     $html .= '<input type="hidden" name="fmr_row_marker['.$id.']" value="1">';
     $html .= '<div class="d-flex justify-content-between align-items-center mb-2">';
-    $html .= '<strong>'.htmlspecialchars($type['label']).'</strong>';
+    // bi-grip-vertical is the theme's own drag-handle icon (used elsewhere
+    // for SortableJS-draggable rows); purely decorative here since the
+    // whole row - not just this icon - is the drag target.
+    $html .= '<h6 class="mb-0 d-flex align-items-center gap-2"><i class="bi bi-grip-vertical text-muted" aria-hidden="true"></i>'.htmlspecialchars($type['label']).'</h6>';
     $html .= '<button type="button" class="btn btn-sm btn-default text-danger"
         hx-post="/admin-xhr/addons/plugin/former/write/"
         hx-vals=\'{"delete_field":"'.$id.'","csrf_token":"'.$_SESSION['token'].'"}\'

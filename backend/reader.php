@@ -87,6 +87,21 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
 
     echo '<hr>';
 
+    // Auto-attached data: sent on top of the actual form fields, into all
+    // three sinks (submissions table, notification mail, former:submitted
+    // JS event - see fmr_build_submission_meta() / global/xhr.php). Not
+    // configurable beyond on/off by design - see xhr.php for the fixed set
+    // of keys each checkbox adds.
+    echo '<div class="mb-2"><strong>'.$addon_lang['title_auto_data'].'</strong></div>';
+
+    echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="include_user_data" value="1" id="fmr-include-user" '.($form['include_user_data'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-include-user">'.$addon_lang['label_include_user_data'].'</label></div>';
+
+    echo '<div class="mb-3 form-check"><input type="checkbox" class="form-check-input" name="include_ip_referrer" value="1" id="fmr-include-ip" '.($form['include_ip_referrer'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-include-ip">'.$addon_lang['label_include_ip_referrer'].'</label></div>';
+
+    echo '<hr>';
+
     echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="store_to_db" value="1" id="fmr-store" '.($form['store_to_db'] ? 'checked' : '').'>';
     echo '<label class="form-check-label" for="fmr-store">'.$addon_lang['label_store_to_db'].'</label></div>';
 
@@ -212,6 +227,7 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
 
     $fields = $former_db->select('fields', ['field_key', 'label'], ['form_id' => $form_id]);
     $labels = array_column($fields, 'label', 'field_key');
+    $meta_labels = fmr_meta_labels();
 
     $total = $former_db->count('submissions', ['form_id' => $form_id]);
     $submissions = $former_db->select('submissions', '*', [
@@ -227,6 +243,7 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
 
     foreach ($submissions as $submission) {
         $data = json_decode($submission['data'], true) ?: [];
+        $meta = json_decode($submission['meta'] ?? '', true) ?: [];
         $files = $former_db->select('submission_files', '*', ['submission_id' => $submission['id']]);
 
         echo '<div class="card mb-2"><div class="card-body">';
@@ -235,6 +252,12 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
         foreach ($data as $key => $value) {
             $label = $labels[$key] ?? $key;
             echo '<tr><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars(is_array($value) ? implode(', ', $value) : (string) $value).'</td></tr>';
+        }
+        // Auto-attached data (fmr_build_submission_meta()), rendered muted
+        // to visually set it apart from the admin-defined fields above.
+        foreach ($meta as $key => $value) {
+            $label = $meta_labels[$key] ?? $key;
+            echo '<tr class="text-muted"><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
         }
         echo '</table>';
 
@@ -259,6 +282,93 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
                 hx-target="#formSubmissionsList" hx-swap="innerHTML">'.$p.'</a></li>';
         }
         echo '</ul></nav>';
+    }
+    exit;
+}
+
+/* ---------------------------------------------------------------
+ * Help tab (backend/docs.php) - same docs pattern as plugins/paddle-pay
+ * (docs/<lang>/*.md + core's se_parse_docs_file(), falls back to docs/en
+ * if the admin's language has no folder). Kept to a single index.md for
+ * now; sidebar/multi-page is already wired for whenever more pages are
+ * needed, same as paddle-pay's.
+ * -------------------------------------------------------------- */
+if (isset($_GET['show']) && $_GET['show'] === 'docs_nav') {
+
+    // se_parse_docs_file() (acp/core/functions.php) does `global $Parsedown`
+    // internally and calls $Parsedown->text(...) - it's never instantiated
+    // anywhere in the admin-xhr include chain (public/admin_xhr.php ->
+    // acp/data_reader.php -> core/addons/data-reader.php -> here), only
+    // locally right before use at its other call sites (see e.g.
+    // acp/core/addons/edit-theme.php), so it has to be set here too.
+    // Without it this fatals on a null method call, and with admin_xhr.php's
+    // error_reporting(0) that comes out as a silently empty response.
+    $Parsedown = new Parsedown();
+
+    $docs_root = SE_ROOT.'plugins/former/docs/en';
+    if (is_dir(SE_ROOT.'plugins/former/docs/'.$languagePack)) {
+        $docs_root = SE_ROOT.'plugins/former/docs/'.$languagePack;
+    }
+
+    $current_file = basename($_GET['file'] ?? 'index.md');
+    $docsfiles = glob($docs_root.'/*.md');
+    $parsed_files = [];
+
+    foreach ($docsfiles as $doc) {
+        // skip tooltips
+        if (str_starts_with(basename($doc), 'tip-')) {
+            continue;
+        }
+
+        $parsed_file = se_parse_docs_file($doc);
+        $parsed_files[] = [
+            'title' => $parsed_file['header']['title'],
+            'priority' => $parsed_file['header']['priority'],
+            'btn' => $parsed_file['header']['btn'],
+            'file' => $doc,
+        ];
+    }
+
+    $sorted_parsed_files = se_array_multisort($parsed_files, 'priority', SORT_ASC);
+
+    // docs_nav is only fetched once (hx-trigger="load" in backend/docs.php);
+    // clicking a button only swaps #docsContent, the sidebar itself is never
+    // re-requested. So the active class is toggled client-side on click
+    // instead of depending on another server round-trip - hx-on:click is
+    // already used elsewhere in the admin theme (e.g. hx-on::after-request
+    // in acp/core/settings/labels.php) for exactly this kind of one-off DOM
+    // tweak alongside an hx-get.
+    $list = '<div class="card mb-3">';
+    $list .= '<div class="list-group list-group-flush">';
+    foreach ($sorted_parsed_files as $v) {
+        $active = basename($v['file']) === $current_file ? ' active' : '';
+        $hx_get = '/admin-xhr/addons/plugin/former/read/?show=docs_content&file='.basename($v['file']);
+        $list .= '<button class="list-group-item list-group-item-action'.$active.'" hx-get="'.$hx_get.'" hx-target="#docsContent"
+            hx-on:click="this.closest(\'.list-group\').querySelectorAll(\'.active\').forEach(function(el){ el.classList.remove(\'active\'); }); this.classList.add(\'active\')">';
+        $list .= $v['btn'];
+        $list .= '</button>';
+    }
+    $list .= '</div>';
+    $list .= '</div>';
+    echo $list;
+    exit;
+}
+
+if (isset($_GET['show']) && $_GET['show'] === 'docs_content') {
+
+    // see the docs_nav block above for why this is needed
+    $Parsedown = new Parsedown();
+
+    $df = basename($_GET['file'] ?? 'index.md');
+
+    $doc_file = SE_ROOT.'plugins/former/docs/'.$languagePack.'/'.$df;
+    if (!is_file($doc_file)) {
+        $doc_file = SE_ROOT.'plugins/former/docs/en/'.$df;
+    }
+
+    if (is_file($doc_file)) {
+        $parsed_file = se_parse_docs_file($doc_file);
+        echo $parsed_file['content'];
     }
     exit;
 }
