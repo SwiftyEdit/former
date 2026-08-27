@@ -18,6 +18,23 @@ priority: 200
 4. Recipients for the e-mail notification are managed centrally under the plugin's
    **Settings** tab, then picked per form via checkbox.
 
+## Styling individual fields
+
+Every field has a **CSS class(es)** input. Its value is appended to (not a replacement for)
+the field wrapper's existing classes - useful for placing two fields side by side (with your
+own theme's grid/utility classes) or highlighting a single field. Enter multiple classes
+separated by spaces, same as any HTML `class` attribute.
+
+## Template sets: restyling the whole form
+
+If a CSS class isn't enough - e.g. the form needs a fundamentally different structure (its
+own grid, normal instead of floating labels, a fully custom look) - pick a **Template set**
+per form under **Settings → Appearance**. Sets are subfolders under
+`plugins/former/data/themes/`; see the README in that folder for the exact layout and a
+worked example. A set survives Former and SwiftyEdit updates untouched, since `data/` is
+excluded from both - custom sets are entirely an installation's own, never shipped with or
+committed to the plugin.
+
 ## Submissions
 
 Every form has its own **Submissions** view (reachable via the button in the form list),

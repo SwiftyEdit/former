@@ -268,6 +268,64 @@ function fmr_allowed_content_tags(): string {
 }
 
 /* -------------------------------------------------------------------
+ * Template-sets - per-form override of the shipped templates/ tree,
+ * without touching the active SwiftyEdit theme or the plugin's own
+ * templates/ (which a Former update overwrites). Sets live under
+ * data/themes/<slug>/, mirroring templates/'s own layout
+ * (form-wrapper.tpl, success.tpl, fields/*.tpl); data/ is skipped
+ * unconditionally by the core installer's update extractor and
+ * excluded from release zips (scripts/build_plugin_release.sh), so a
+ * site's own sets survive both Former and core updates untouched.
+ * ---------------------------------------------------------------- */
+
+/**
+ * Slugs of available template-sets (subfolder names under data/themes/),
+ * for the "Template-set" <select> in the form settings and to validate
+ * a posted choice against in backend/writer.php. Hidden entries (like
+ * .gitkeep) and anything not matching the same charset a set slug is
+ * validated against on lookup are silently skipped rather than listed.
+ */
+function fmr_list_template_sets(): array {
+    $dir = __DIR__.'/../data/themes/';
+    if (!is_dir($dir)) {
+        return [];
+    }
+
+    $sets = [];
+    foreach (scandir($dir) as $entry) {
+        if ($entry === '' || $entry[0] === '.') {
+            continue;
+        }
+        if (is_dir($dir.$entry) && preg_match('/^[a-zA-Z0-9_-]+$/', $entry)) {
+            $sets[] = $entry;
+        }
+    }
+    sort($sets);
+    return $sets;
+}
+
+/**
+ * Resolve one template file for a form's chosen set, falling back to the
+ * plugin's own shipped copy when the set doesn't override that particular
+ * file (or no set is chosen at all) - a set only needs to provide the
+ * files it actually changes. $relative_path is always one of the fixed
+ * literals this file passes in below, never user input; $set is
+ * whitelisted here too as defense in depth, even though callers already
+ * only pass a form's stored template_set (itself validated against
+ * fmr_list_template_sets() when saved in backend/writer.php).
+ */
+function fmr_resolve_template(string $relative_path, ?string $set): string {
+    if ($set && preg_match('/^[a-zA-Z0-9_-]+$/', $set)) {
+        $custom = __DIR__.'/../data/themes/'.$set.'/'.$relative_path;
+        if (is_file($custom)) {
+            return $custom;
+        }
+    }
+
+    return __DIR__.'/../templates/'.$relative_path;
+}
+
+/* -------------------------------------------------------------------
  * Form rendering - shared between the shortcode entry point
  * (plugins/former/index.php) and the error/re-render paths in
  * global/xhr.php, so a failed submission re-renders identically
@@ -283,6 +341,8 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
         return '<div class="alert alert-warning">Formular nicht verfügbar.</div>';
     }
 
+    $set = $form['template_set'] ?? null;
+
     $fields = $former_db->select('fields', '*', [
         'form_id' => $form_id,
         'ORDER' => ['sort_order' => 'ASC'],
@@ -297,7 +357,7 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
             continue;
         }
 
-        $tpl_file = __DIR__.'/../templates/fields/'.$type['template'];
+        $tpl_file = fmr_resolve_template('fields/'.$type['template'], $set);
         if (!is_file($tpl_file)) {
             continue;
         }
@@ -316,6 +376,7 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
             // Not htmlspecialchars()'d - the whole point is to let the
             // admin-authored whitelisted tags render as real markup.
             $content = strip_tags($config['content'] ?? '', fmr_allowed_content_tags());
+            $tpl = str_replace('{css_class}', htmlspecialchars($field['css_class'] ?? ''), $tpl);
             $fields_html .= str_replace('{content}', nl2br($content), $tpl);
             continue;
         }
@@ -326,6 +387,7 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
         $tpl = str_replace('{label}', htmlspecialchars($field['label']), $tpl);
         $tpl = str_replace('{placeholder}', htmlspecialchars($field['placeholder'] ?? ''), $tpl);
         $tpl = str_replace('{required}', $field['required'] ? 'required' : '', $tpl);
+        $tpl = str_replace('{css_class}', htmlspecialchars($field['css_class'] ?? ''), $tpl);
         $tpl = str_replace('{rows}', htmlspecialchars((string) ($config['rows'] ?? 4)), $tpl);
         $tpl = str_replace('{min}', htmlspecialchars((string) ($config['min'] ?? '')), $tpl);
         $tpl = str_replace('{max}', htmlspecialchars((string) ($config['max'] ?? '')), $tpl);
@@ -375,14 +437,14 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
         $captcha_html = str_replace(
             '{site_key}',
             htmlspecialchars($fmr_settings['recaptcha_site_key'] ?? ''),
-            file_get_contents(__DIR__.'/../templates/fields/captcha-recaptcha.tpl')
+            file_get_contents(fmr_resolve_template('fields/captcha-recaptcha.tpl', $set))
         );
     } else {
         fmr_generate_captcha();
         $captcha_html = str_replace(
             '{captcha_label}',
             htmlspecialchars($_SESSION['fmr_captcha_question']),
-            file_get_contents(__DIR__.'/../templates/fields/captcha-math.tpl')
+            file_get_contents(fmr_resolve_template('fields/captcha-math.tpl', $set))
         );
     }
 
@@ -394,7 +456,7 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
         }
     }
 
-    $wrapper = file_get_contents(__DIR__.'/../templates/form-wrapper.tpl');
+    $wrapper = file_get_contents(fmr_resolve_template('form-wrapper.tpl', $set));
     $wrapper = str_replace('{form_id}', (string) $form_id, $wrapper);
     $wrapper = str_replace('{enctype}', $has_upload_field ? 'enctype="multipart/form-data"' : '', $wrapper);
     $wrapper = str_replace('{banner_html}', $banner_html, $wrapper);
@@ -469,6 +531,13 @@ function fmr_render_field_row(array $field): string {
         $html .= '<div class="col-md-6"><input type="text" class="form-control form-control-sm" name="field_placeholder['.$id.']" value="'.htmlspecialchars($field['placeholder'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_placeholder'] ?? 'Placeholder').'"></div>';
         $html .= '<div class="col-md-6 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_required['.$id.']" value="1" '.($field['required'] ? 'checked' : '').' id="fmr-req-'.$id.'"><label class="form-check-label" for="fmr-req-'.$id.'">'.htmlspecialchars($addon_lang['label_field_required'] ?? 'Required').'</label></div>';
     }
+
+    // Applies to every field type incl. static text blocks - both wrap
+    // their output in a single outer <div>, so a free-text class is always
+    // meaningful here, unlike the type-gated config_fields below. Appended
+    // to (never replacing) the wrapper's own hard-coded classes at render
+    // time - see fmr_render_form()/the {css_class} token in each field .tpl.
+    $html .= '<div class="col-md-12"><input type="text" class="form-control form-control-sm" name="field_css_class['.$id.']" value="'.htmlspecialchars($field['css_class'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_css_class'] ?? 'CSS class(es)').'"></div>';
 
     if (in_array('content', $type['config_fields'] ?? [], true)) {
         $html .= '<div class="col-md-12"><label class="form-label small">'.htmlspecialchars($addon_lang['label_field_content'] ?? 'Text').'</label><textarea class="form-control form-control-sm" rows="4" name="field_content['.$id.']">'.htmlspecialchars($config['content'] ?? '').'</textarea></div>';

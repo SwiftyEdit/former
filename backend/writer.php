@@ -44,6 +44,14 @@ if (isset($_POST['save_form_settings'])) {
 
     $recipients = array_map('intval', $_POST['mail_recipients'] ?? []);
 
+    // Re-validated against the actual folder list rather than trusted from
+    // $_POST as-is - a stale/tampered value would otherwise silently fall
+    // back to the default templates anyway (fmr_resolve_template() checks
+    // is_file() too), but storing only a known-good slug keeps the form
+    // settings screen honest about what's actually selected.
+    $posted_set = $_POST['template_set'] ?? '';
+    $template_set = in_array($posted_set, fmr_list_template_sets(), true) ? $posted_set : '';
+
     $former_db->update('forms', [
         'name' => sanitizeUserInputs($_POST['name'] ?? ''),
         'description' => sanitizeUserInputs($_POST['description'] ?? ''),
@@ -58,6 +66,7 @@ if (isset($_POST['save_form_settings'])) {
         'success_message' => sanitizeUserInputs($_POST['success_message'] ?? ''),
         'error_message' => sanitizeUserInputs($_POST['error_message'] ?? ''),
         'submit_button_label' => sanitizeUserInputs($_POST['submit_button_label'] ?? ''),
+        'template_set' => $template_set,
         'updated_at' => date('Y-m-d H:i:s'),
     ], ['id' => $form_id]);
 
@@ -122,6 +131,7 @@ if (isset($_POST['save_fields'])) {
     $keys = $_POST['field_key'] ?? [];
     $placeholders = $_POST['field_placeholder'] ?? [];
     $required = $_POST['field_required'] ?? [];
+    $css_classes = $_POST['field_css_class'] ?? [];
     $rows = $_POST['field_rows'] ?? [];
     $mins = $_POST['field_min'] ?? [];
     $maxs = $_POST['field_max'] ?? [];
@@ -225,6 +235,7 @@ if (isset($_POST['save_fields'])) {
             'field_key' => $key,
             'placeholder' => sanitizeUserInputs($placeholders[$field_id] ?? ''),
             'required' => isset($required[$field_id]) ? 1 : 0,
+            'css_class' => sanitizeUserInputs($css_classes[$field_id] ?? ''),
             'sort_order' => $position,
             'config' => json_encode($config, JSON_UNESCAPED_UNICODE),
         ], ['id' => $field_id]);

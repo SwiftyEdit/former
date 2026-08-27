@@ -87,6 +87,19 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
 
     echo '<hr>';
 
+    echo '<div class="mb-2"><strong>'.$addon_lang['title_template_set'].'</strong></div>';
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_template_set'].'</label>';
+    echo '<select class="form-select" name="template_set">';
+    echo '<option value="">'.$addon_lang['option_template_set_default'].'</option>';
+    foreach (fmr_list_template_sets() as $set_slug) {
+        $selected = ($form['template_set'] ?? '') === $set_slug ? 'selected' : '';
+        echo '<option value="'.htmlspecialchars($set_slug).'" '.$selected.'>'.htmlspecialchars($set_slug).'</option>';
+    }
+    echo '</select>';
+    echo '<div class="form-text">'.$addon_lang['hint_template_set'].'</div></div>';
+
+    echo '<hr>';
+
     // Auto-attached data: sent on top of the actual form fields, into all
     // three sinks (submissions table, notification mail, former:submitted
     // JS event - see fmr_build_submission_meta() / global/xhr.php). Not

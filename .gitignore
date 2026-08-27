@@ -19,6 +19,13 @@ Thumbs.db
 /uploads/*
 !/uploads/.gitkeep
 
+# Per-site custom template sets (betreiber-owned, not plugin source - see
+# data/themes/README.md). Keep the folder + its own docs tracked, not the
+# sets a specific installation drops in.
+/data/themes/*
+!/data/themes/.gitkeep
+!/data/themes/README.md
+
 # Release build artifacts (attach to GitHub Releases instead of committing)
 /*.zip
 

@@ -1,1 +1,1 @@
-<div class="mb-3">{content}</div>
+<div class="mb-3 {css_class}">{content}</div>

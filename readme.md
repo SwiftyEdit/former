@@ -15,6 +15,13 @@ The form ID is shown in the form list in the backend (Addons > Former).
 - Unlimited forms, assembled via drag & drop from field templates
 - Field types: text, textarea, email, number, select, radio buttons, checkbox, file upload,
   plus a plain text/explanation block with no input (e.g. for longer instructions inside the form)
+- Optional free-text CSS class(es) per field, appended to that field's wrapper `<div>` - for
+  layout (e.g. a grid/utility class to place two fields side by side) or emphasis (e.g.
+  highlighting one field), independent of whether the site's theme is Bootstrap-based or not
+- Optional per-form template-set: swap the markup of the whole form (or individual field
+  types within it) for a custom look, selected per form under Settings → Appearance. Sets
+  live in `data/themes/<slug>/`, outside the plugin's own update path - see
+  `data/themes/README.md`
 - Configurable per form: store submissions in the database and/or send them by email to
   selected recipients (or both)
 - Multiple recipients can be defined in the plugin settings; a checkbox per form controls

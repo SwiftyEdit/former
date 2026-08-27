@@ -260,7 +260,7 @@ $tracking_json = json_encode([
     'meta' => $meta,
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
 
-$success_tpl = file_get_contents(__DIR__.'/../templates/success.tpl');
+$success_tpl = file_get_contents(fmr_resolve_template('success.tpl', $form['template_set'] ?? null));
 $success_tpl = str_replace('{form_id}', (string) $form_id, $success_tpl);
 $success_tpl = str_replace('{message}', htmlspecialchars($form['success_message'] ?: 'Vielen Dank für Ihre Nachricht!'), $success_tpl);
 $success_tpl = str_replace('{tracking_event_json}', $tracking_json, $success_tpl);
