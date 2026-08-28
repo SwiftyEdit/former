@@ -115,7 +115,17 @@ foreach ($fields as $field) {
     $raw = $_POST[$key] ?? '';
     $value = fmr_sanitize_value($raw);
 
-    if ($field['required'] && (is_array($value) ? empty($value) : $value === '')) {
+    // Hidden fields are typically filled by an external site-wide script
+    // (GTM etc.) matching the rendered id/name - required is never
+    // enforced for them regardless of the stored flag, since that script
+    // not running/matching (ad blockers, consent banners delaying it,
+    // visiting the page directly instead of via an ad) would otherwise
+    // silently block the whole form for a value the visitor never sees and
+    // can't fix. The admin UI (fmr_render_field_row()) already hides the
+    // checkbox for this type; this is defense in depth against a
+    // field_type='hidden' row that ever ends up with required=1 some
+    // other way.
+    if ($field['required'] && $field['field_type'] !== 'hidden' && (is_array($value) ? empty($value) : $value === '')) {
         $errors[] = $field['label'].' ist ein Pflichtfeld.';
     }
 
@@ -251,7 +261,8 @@ if ((int) $form['store_to_db'] === 1) {
  * JSON_HEX_* escaping makes it safe to embed inside a <script> block even
  * if a submitted value contains "</script>" or HTML. `meta` carries
  * whatever fmr_build_submission_meta() added per the form's "include_user_
- * data" / "include_ip_referrer" checkboxes - empty object if neither is on. */
+ * data" / "include_ip_referrer" / "include_page_info" checkboxes - empty
+ * object if none is on. */
 $tracking_json = json_encode([
     'form_id' => $form_id,
     'form_name' => $form['name'],

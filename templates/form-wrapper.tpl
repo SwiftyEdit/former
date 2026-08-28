@@ -9,6 +9,7 @@
 <input type="text" name="fmr_hp" value="" tabindex="-1" autocomplete="off">
 </div>
 <input type="hidden" name="sendtime" value="{sendtime}">
+<input type="hidden" name="fmr_page_slug" value="{page_slug}">
 {hidden_csrf_token}
 <button type="submit" class="btn btn-primary">{submit_label}</button>
 </form>

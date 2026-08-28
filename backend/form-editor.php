@@ -9,7 +9,14 @@ if (!$form) {
     return;
 }
 
-echo '<h1>'.$addon_lang['title_form_editor'].' – '.htmlspecialchars($form['name']).'</h1>';
+// Small breadcrumb-style heading, not a full <h1> - form-editor isn't its
+// own tab (it's reached via the "Bearbeiten" button on a row in the
+// "Formulare" tab's list), so this exists only to say *which* form is open,
+// with a way back to that list.
+echo '<nav class="mb-3" aria-label="breadcrumb"><ol class="breadcrumb mb-0">';
+echo '<li class="breadcrumb-item"><a href="/admin/addons/plugin/former/start/">'.htmlspecialchars($addon_lang['title_forms_list']).'</a></li>';
+echo '<li class="breadcrumb-item active" aria-current="page">'.$addon_lang['title_form_editor'].' – '.htmlspecialchars($form['name']).'</li>';
+echo '</ol></nav>';
 
 echo '<div class="row">';
 
@@ -50,10 +57,15 @@ echo '<div id="formCanvasResponse"></div>';
  * The admin theme's .sortable_target::after rule (public/assets/themes/
  * administration/src/scss/_form.scss) always renders "DROP IMAGES HERE" -
  * it's meant for the image picker, the other consumer of this shared
- * Sortable component. #formCanvas needs the class for the Sortable wiring
- * (see note below) but the wording is wrong here, so it's overridden with
- * an id+class selector, which outweighs the theme's plain-class selector on
- * specificity - no !important, no core file touched.
+ * Sortable component. Wrong wording for former (used to be overridden to
+ * "FORMULARFELDER HIER ABLEGEN"), but also just misleading regardless of
+ * wording: fields aren't added by dragging them into this canvas from
+ * outside, they're added via the "+ <Type>" buttons above - dragging
+ * inside #formCanvas only reorders fields already added. Suppressed
+ * entirely (content: none, not just relabeled) with an id+class selector,
+ * which outweighs the theme's plain-class selector on specificity - no
+ * !important, no core file touched. (The empty-canvas hint instead comes
+ * from msg_no_fields, a plain <p> - see below.)
  *
  * The rows themselves reuse bootstrap's .list-group-item (see
  * fmr_render_field_row()), which by design collapses adjacent items onto a
@@ -66,7 +78,7 @@ echo '<div id="formCanvasResponse"></div>';
  * class-only ones, so this stays override-only, no !important.
  */
 echo '<style>
-#formCanvas.sortable_target::after { content: "'.htmlspecialchars($addon_lang['msg_canvas_dropzone']).'"; }
+#formCanvas.sortable_target::after { content: none; }
 #formCanvas.sortable_target > .draggable {
     margin-bottom: 10px;
     border: 1px solid var(--bs-border-color);

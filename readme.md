@@ -14,7 +14,9 @@ The form ID is shown in the form list in the backend (Addons > Former).
 
 - Unlimited forms, assembled via drag & drop from field templates
 - Field types: text, textarea, email, number, select, radio buttons, checkbox, file upload,
-  plus a plain text/explanation block with no input (e.g. for longer instructions inside the form)
+  a hidden field (e.g. for tracking values like `gclid`/UTM parameters that an external
+  site-wide script fills in by matching the field's name), plus a plain text/explanation
+  block with no input (e.g. for longer instructions inside the form)
 - Optional free-text CSS class(es) per field, appended to that field's wrapper `<div>` - for
   layout (e.g. a grid/utility class to place two fields side by side) or emphasis (e.g.
   highlighting one field), independent of whether the site's theme is Bootstrap-based or not
@@ -24,6 +26,9 @@ The form ID is shown in the form list in the backend (Addons > Former).
   `data/themes/README.md`
 - Configurable per form: store submissions in the database and/or send them by email to
   selected recipients (or both)
+- A dedicated **Submissions** tab lists stored submissions across all forms at once, with a
+  filter dropdown to narrow it to one form (the per-form "Submissions" button in the form
+  list leads into the same tab, preselected to that form)
 - Multiple recipients can be defined in the plugin settings; a checkbox per form controls
   who gets notified
 - Captcha: simple math captcha (default) or Google reCAPTCHA v2, switchable in the plugin
@@ -34,25 +39,30 @@ The form ID is shown in the form list in the backend (Addons > Former).
 - Submission happens via HTMX without a page reload
 - Fires a `former:submitted` browser event on success, for the theme (or a GTM snippet) to
   hook conversion tracking into - see below
-- Optionally, per form: auto-attach the logged-in user (user ID, username, e-mail) and/or
-  the visitor's IP address & referrer to every submission - see below
+- Optionally, per form: auto-attach the logged-in user (user ID, username, e-mail), the
+  visitor's IP address/referrer/browser, and/or the page the form was submitted from and
+  when, to every submission - see below
 - Built-in "Help" tab in the plugin's own backend UI (`Formulare | Einstellungen | Hilfe`),
   documented per language under `docs/<lang>/` - same pattern as `plugins/paddle-pay`
 
-## Auto-attached data (logged-in user / IP & referrer)
+## Auto-attached data (logged-in user / user data / page info)
 
-Two checkboxes in a form's settings ("Auto-attached data") add a fixed, non-configurable set
-of extra data points on top of the form's own fields - into all three places a submission can
-end up: the submissions list, the notification mail, and the `former:submitted` event below.
-Both default to off.
+Three checkboxes in a form's settings ("Auto-attached data") add a fixed, non-configurable
+set of extra data points on top of the form's own fields - into all three places a
+submission can end up: the submissions list, the notification mail, and the
+`former:submitted` event below. All default to off.
 
 - **Include logged-in user**: `user_id`, `user_nick`, `user_mail` from the visitor's own
   session (the site-wide login shared with the shop/profile area, not just backend admins).
   Adds nothing if the visitor isn't logged in.
-- **Include IP address & referrer**: `ip_address` and the `Referer` header of the submit
-  request. Note the referrer here is whatever page the visitor was on *when they submitted*,
-  not necessarily the original ad/landing page they arrived from if they navigated the site
-  first.
+- **Include user data**: `ip_address`, `referrer` (the `Referer` header of the submit
+  request - note this is whatever page the visitor was on *when they submitted*, not
+  necessarily the original ad/landing page they arrived from if they navigated the site
+  first), and `browser` (the `User-Agent` header).
+- **Include page information**: `page_url`, the site-relative slug (`$swifty_slug`) of the
+  page the form was embedded on - captured server-side into a hidden field when the form is
+  rendered, not read from the submit request's own `Referer` - and `submitted_at`, the
+  submission timestamp.
 
 There is deliberately no built-in privacy-notice text for these - use a "Text / explanation"
 field in the form itself if you want to inform submitters, and make sure your own privacy
@@ -65,7 +75,7 @@ On a successful submission, former dispatches a `CustomEvent` on `document` (bub
 can also be caught on a form's own wrapper element). It carries the form id/name, the
 submission id (`null` if "store in database" is off for that form), the sanitized field
 values that were just submitted, and the auto-attached data described above (`meta`, empty
-object if neither checkbox is on) - i.e. the visitor's own data, handed back to their own
+object if no checkbox is on) - i.e. the visitor's own data, handed back to their own
 browser. Former makes no external network calls itself; what happens with the event,
 including forwarding any of this to a third party like Google or Salesforce, is entirely up
 to the theme.

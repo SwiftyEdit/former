@@ -85,9 +85,14 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
     echo '<label class="form-check-label" for="fmr-disable-captcha">'.$addon_lang['label_disable_captcha'].'</label>';
     echo '<div class="form-text">'.$addon_lang['hint_disable_captcha'].'</div></div>';
 
-    echo '<hr>';
-
-    echo '<div class="mb-2"><strong>'.$addon_lang['title_template_set'].'</strong></div>';
+    // Everything below was previously a flat list of sections separated by
+    // <hr>, making the settings form very long once a form has recipients
+    // etc. - now each former-<hr> section is a collapsed-by-default
+    // Bootstrap collapse instead (same data-bs-toggle pattern already used
+    // in plugins/paddle-pay/backend/settings.php), so only name/status/
+    // captcha stay always visible.
+    echo fmr_settings_section_toggle('fmrCollapseTemplate', $addon_lang['title_template_set']);
+    echo '<div class="collapse mb-3" id="fmrCollapseTemplate">';
     echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_template_set'].'</label>';
     echo '<select class="form-select" name="template_set">';
     echo '<option value="">'.$addon_lang['option_template_set_default'].'</option>';
@@ -97,23 +102,30 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
     }
     echo '</select>';
     echo '<div class="form-text">'.$addon_lang['hint_template_set'].'</div></div>';
-
-    echo '<hr>';
+    echo '</div>';
 
     // Auto-attached data: sent on top of the actual form fields, into all
     // three sinks (submissions table, notification mail, former:submitted
     // JS event - see fmr_build_submission_meta() / global/xhr.php). Not
     // configurable beyond on/off by design - see xhr.php for the fixed set
     // of keys each checkbox adds.
-    echo '<div class="mb-2"><strong>'.$addon_lang['title_auto_data'].'</strong></div>';
+    echo fmr_settings_section_toggle('fmrCollapseAutoData', $addon_lang['title_auto_data']);
+    echo '<div class="collapse mb-3" id="fmrCollapseAutoData">';
 
     echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="include_user_data" value="1" id="fmr-include-user" '.($form['include_user_data'] ? 'checked' : '').'>';
     echo '<label class="form-check-label" for="fmr-include-user">'.$addon_lang['label_include_user_data'].'</label></div>';
 
-    echo '<div class="mb-3 form-check"><input type="checkbox" class="form-check-input" name="include_ip_referrer" value="1" id="fmr-include-ip" '.($form['include_ip_referrer'] ? 'checked' : '').'>';
-    echo '<label class="form-check-label" for="fmr-include-ip">'.$addon_lang['label_include_ip_referrer'].'</label></div>';
+    echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="include_ip_referrer" value="1" id="fmr-include-ip" '.($form['include_ip_referrer'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-include-ip">'.$addon_lang['label_include_ip_referrer'].'</label>';
+    echo '<div class="form-text">'.$addon_lang['hint_include_ip_referrer'].'</div></div>';
 
-    echo '<hr>';
+    echo '<div class="mb-3 form-check"><input type="checkbox" class="form-check-input" name="include_page_info" value="1" id="fmr-include-page-info" '.($form['include_page_info'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-include-page-info">'.$addon_lang['label_include_page_info'].'</label>';
+    echo '<div class="form-text">'.$addon_lang['hint_include_page_info'].'</div></div>';
+    echo '</div>';
+
+    echo fmr_settings_section_toggle('fmrCollapseStorage', $addon_lang['title_storage_mail']);
+    echo '<div class="collapse mb-3" id="fmrCollapseStorage">';
 
     echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="store_to_db" value="1" id="fmr-store" '.($form['store_to_db'] ? 'checked' : '').'>';
     echo '<label class="form-check-label" for="fmr-store">'.$addon_lang['label_store_to_db'].'</label></div>';
@@ -134,8 +146,10 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
         echo '<label class="form-check-label" for="fmr-r-'.$r['id'].'">'.htmlspecialchars($r['name']).' &lt;'.htmlspecialchars($r['email']).'&gt;</label></div>';
     }
     echo '</div>';
+    echo '</div>';
 
-    echo '<hr>';
+    echo fmr_settings_section_toggle('fmrCollapseMessages', $addon_lang['title_messages']);
+    echo '<div class="collapse mb-3" id="fmrCollapseMessages">';
 
     echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_success_message'].'</label>';
     echo '<textarea class="form-control" name="success_message">'.htmlspecialchars($form['success_message'] ?? '').'</textarea></div>';
@@ -145,6 +159,7 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
 
     echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_submit_button_label'].'</label>';
     echo '<input type="text" class="form-control" name="submit_button_label" value="'.htmlspecialchars($form['submit_button_label'] ?? '').'"></div>';
+    echo '</div>';
 
     echo '<input type="hidden" name="csrf_token" value="'.$_SESSION['token'].'">';
     echo '<button type="submit" class="btn btn-primary">'.$addon_lang['btn_save'].'</button>';
@@ -238,13 +253,24 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
     $page = max(1, (int) ($_GET['page'] ?? 1));
     $per_page = 20;
 
-    $fields = $former_db->select('fields', ['field_key', 'label'], ['form_id' => $form_id]);
-    $labels = array_column($fields, 'label', 'field_key');
+    // form_id=0 means "all forms" (the top-level Einsendungen tab's
+    // default filter, backend/submissions.php) - a submitted field_key can
+    // mean something different (or nothing) in another form, so the label
+    // lookup has to stay per-form rather than one flat map. Fetched
+    // unconditionally across every form either way, not just when
+    // filtering - one code path for both cases, and cheap enough for an
+    // admin list capped at $per_page rows per page.
+    $all_fields = $former_db->select('fields', ['form_id', 'field_key', 'label']);
+    $labels_by_form = [];
+    foreach ($all_fields as $f) {
+        $labels_by_form[(int) $f['form_id']][$f['field_key']] = $f['label'];
+    }
+    $form_names = array_column($former_db->select('forms', ['id', 'name']), 'name', 'id');
     $meta_labels = fmr_meta_labels();
 
-    $total = $former_db->count('submissions', ['form_id' => $form_id]);
-    $submissions = $former_db->select('submissions', '*', [
-        'form_id' => $form_id,
+    $submission_conditions = $form_id > 0 ? ['form_id' => $form_id] : [];
+    $total = $former_db->count('submissions', $submission_conditions);
+    $submissions = $former_db->select('submissions', '*', $submission_conditions + [
         'ORDER' => ['id' => 'DESC'],
         'LIMIT' => [($page - 1) * $per_page, $per_page],
     ]);
@@ -258,9 +284,29 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
         $data = json_decode($submission['data'], true) ?: [];
         $meta = json_decode($submission['meta'] ?? '', true) ?: [];
         $files = $former_db->select('submission_files', '*', ['submission_id' => $submission['id']]);
+        $labels = $labels_by_form[(int) $submission['form_id']] ?? [];
 
         echo '<div class="card mb-2"><div class="card-body">';
-        echo '<div class="text-muted small mb-2">'.$addon_lang['th_submitted_at'].': '.htmlspecialchars($submission['created_at']).' — '.htmlspecialchars($submission['ip_address'] ?? '').'</div>';
+        echo '<div class="d-flex justify-content-between align-items-start mb-2">';
+        echo '<div class="text-muted small">';
+        // Which form this belongs to only needs saying in the unfiltered
+        // "all forms" view - filtered to one form, it's already implied by
+        // the filter dropdown in submissions.php.
+        if ($form_id === 0) {
+            $form_name = $form_names[(int) $submission['form_id']] ?? ('#'.$submission['form_id']);
+            echo '<span class="badge text-bg-secondary me-2">'.htmlspecialchars($form_name).'</span>';
+        }
+        echo $addon_lang['th_submitted_at'].': '.htmlspecialchars($submission['created_at']).' — '.htmlspecialchars($submission['ip_address'] ?? '').'</div>';
+        // Spam etc. - deletes the submission row, its meta, any uploaded
+        // files (DB rows + the actual files on disk) in one go, see
+        // "delete_submission" in backend/writer.php. hx-swap removes just
+        // this card, no full-list reload needed.
+        echo '<button type="button" class="btn btn-sm btn-default text-danger flex-shrink-0"
+            hx-post="/admin-xhr/addons/plugin/former/write/"
+            hx-vals=\'{"delete_submission":"'.$submission['id'].'","csrf_token":"'.$_SESSION['token'].'"}\'
+            hx-confirm="'.htmlspecialchars($addon_lang['msg_confirm_delete_submission']).'"
+            hx-target="closest .card" hx-swap="outerHTML swap:0s">'.$addon_lang['btn_delete'].'</button>';
+        echo '</div>'; // d-flex
         echo '<table class="table table-sm mb-2">';
         foreach ($data as $key => $value) {
             $label = $labels[$key] ?? $key;

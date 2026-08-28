@@ -68,6 +68,21 @@ function fmr_field_types(): array {
             'has_upload' => true,
             'config_fields' => ['allowed_extensions', 'max_size_mb', 'multiple'],
         ],
+        'hidden' => [
+            'label' => $addon_lang['field_type_hidden'] ?? 'Verstecktes Feld',
+            'template' => 'hidden.tpl',
+            'has_options' => false,
+            'has_upload' => false,
+            // NOT is_static - a hidden field does collect a value like a
+            // normal field (goes through global/xhr.php's validation/
+            // collection loop into $clean, is stored/mailed like any other
+            // field), it just renders with no visible input for the
+            // visitor. Typically filled by an external site-wide script
+            // (GTM, a marketing snippet) that matches the field's key as
+            // the rendered input's id/name - e.g. gclid, UTM_Source__c -
+            // rather than by anything former does itself.
+            'config_fields' => ['default_value'],
+        ],
         'text_block' => [
             'label' => $addon_lang['field_type_text_block'] ?? 'Text / explanation',
             'template' => 'text_block.tpl',

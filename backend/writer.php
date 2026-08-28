@@ -59,6 +59,7 @@ if (isset($_POST['save_form_settings'])) {
         'disable_captcha' => isset($_POST['disable_captcha']) ? 1 : 0,
         'include_user_data' => isset($_POST['include_user_data']) ? 1 : 0,
         'include_ip_referrer' => isset($_POST['include_ip_referrer']) ? 1 : 0,
+        'include_page_info' => isset($_POST['include_page_info']) ? 1 : 0,
         'store_to_db' => isset($_POST['store_to_db']) ? 1 : 0,
         'send_mail' => isset($_POST['send_mail']) ? 1 : 0,
         'mail_subject' => sanitizeUserInputs($_POST['mail_subject'] ?? ''),
@@ -140,6 +141,7 @@ if (isset($_POST['save_fields'])) {
     $maxsizes = $_POST['field_maxsize'] ?? [];
     $multiples = $_POST['field_multiple'] ?? [];
     $contents = $_POST['field_content'] ?? [];
+    $default_values = $_POST['field_default_value'] ?? [];
 
     $field_types = fmr_field_types();
     $fields = $former_db->select('fields', '*', ['form_id' => $form_id]);
@@ -204,6 +206,9 @@ if (isset($_POST['save_fields'])) {
         if (in_array('multiple', $config_fields, true)) {
             $config['multiple'] = isset($multiples[$field_id]) ? 1 : 0;
         }
+        if (in_array('default_value', $config_fields, true)) {
+            $config['default_value'] = sanitizeUserInputs($default_values[$field_id] ?? '');
+        }
         if (in_array('content', $config_fields, true)) {
             // Whitelist-strip (not sanitizeUserInputs() - that also runs
             // htmlspecialchars(), which would turn the allowed tags into
@@ -244,6 +249,33 @@ if (isset($_POST['save_fields'])) {
     }
 
     echo '<div class="alert alert-success">'.$addon_lang['msg_saved'].'</div>';
+    exit;
+}
+
+/* ---------------------------------------------------------------
+ * Submissions
+ * -------------------------------------------------------------- */
+
+if (isset($_POST['delete_submission'])) {
+    $submission_id = (int) $_POST['delete_submission'];
+    $submission = $former_db->get('submissions', ['id', 'form_id'], ['id' => $submission_id]);
+
+    if ($submission) {
+        // Uploaded files live at uploads/<form_id>/<stored_filename> (see
+        // global/xhr.php) - form_id isn't on submission_files itself, only
+        // on the parent submission, hence fetching it above.
+        $upload_dir = __DIR__.'/../uploads/'.$submission['form_id'].'/';
+        $files = $former_db->select('submission_files', ['stored_filename'], ['submission_id' => $submission_id]);
+        foreach ($files as $f) {
+            @unlink($upload_dir.$f['stored_filename']);
+        }
+
+        $former_db->delete('submission_files', ['submission_id' => $submission_id]);
+        $former_db->delete('submissions', ['id' => $submission_id]);
+    }
+
+    // Reader.php removes the card client-side via hx-swap on this same
+    // response - nothing to render, an empty 200 is enough.
     exit;
 }
 

@@ -1,8 +1,7 @@
 <?php
 require __DIR__.'/../global/bootstrap.php';
 
-echo '<h1>'.$addon_lang['title_form_settings'].'</h1>';
-
+// No page heading - see the same note in start.php.
 echo '<div class="row">';
 
 echo '<div class="col-md-6">';

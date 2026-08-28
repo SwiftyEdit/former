@@ -120,8 +120,8 @@ function fmr_verify_recaptcha(string $response, string $secret): bool {
 }
 
 /* -------------------------------------------------------------------
- * Auto-attached submission metadata (logged-in user / IP & referrer).
- * Opt-in per form (see the two checkboxes in backend/reader.php's
+ * Auto-attached submission metadata (logged-in user / user data / page
+ * info). Opt-in per form (see the three checkboxes in backend/reader.php's
  * form_settings block), fixed set of keys by design - not user-
  * configurable beyond on/off. Fed into all three sinks alike: the
  * submissions table (own `meta` column), the notification mail, and the
@@ -141,12 +141,26 @@ function fmr_build_submission_meta(array $form): array {
         $meta['user_mail'] = $_SESSION['user_mail'] ?? null;
     }
 
+    // Column is still named include_ip_referrer from before this checkbox
+    // was broadened to "Benutzerdaten mitschicken" (IP, referrer, browser) -
+    // renaming it would need a DB migration for no real benefit, the name
+    // just no longer matches the label shown in the settings form.
     if (!empty($form['include_ip_referrer'])) {
         $meta['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? null;
         // The Referer header on the POST itself - usually just the page the
         // form lives on, not the original ad/landing-page source, once the
         // visitor has navigated around the site first.
         $meta['referrer'] = $_SERVER['HTTP_REFERER'] ?? null;
+        $meta['browser'] = $_SERVER['HTTP_USER_AGENT'] ?? null;
+    }
+
+    if (!empty($form['include_page_info'])) {
+        // The page's own slug, captured server-side into a hidden field at
+        // render time (fmr_render_form()'s {page_slug}) rather than read
+        // from $_SERVER here - this code runs for the /xhr/plugins/former/
+        // endpoint, whose own path is not the page the form was shown on.
+        $meta['page_url'] = $_POST['fmr_page_slug'] ?? null;
+        $meta['submitted_at'] = date('Y-m-d H:i:s');
     }
 
     return $meta;
@@ -165,6 +179,9 @@ function fmr_meta_labels(): array {
         'user_mail' => $addon_lang['label_meta_user_mail'] ?? 'E-Mail (angemeldet)',
         'ip_address' => $addon_lang['label_meta_ip_address'] ?? 'IP-Adresse',
         'referrer' => $addon_lang['label_meta_referrer'] ?? 'Referrer',
+        'browser' => $addon_lang['label_meta_browser'] ?? 'Browser',
+        'page_url' => $addon_lang['label_meta_page_url'] ?? 'Seiten-URL',
+        'submitted_at' => $addon_lang['label_meta_submitted_at'] ?? 'Zeitpunkt der Absendung',
     ];
 }
 
@@ -333,7 +350,7 @@ function fmr_resolve_template(string $relative_path, ?string $set): string {
  * ---------------------------------------------------------------- */
 
 function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner_html = ''): string {
-    global $former_db, $hidden_csrf_token;
+    global $former_db, $hidden_csrf_token, $swifty_slug;
 
     $form = $former_db->get('forms', '*', ['id' => $form_id]);
 
@@ -423,6 +440,15 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
             $tpl = str_replace('{multiple}', !empty($config['multiple']) ? 'multiple' : '', $tpl);
         } elseif ($field['field_type'] === 'checkbox') {
             $tpl = str_replace('{checked}', $repop_value !== '' ? 'checked' : '', $tpl);
+        } elseif ($field['field_type'] === 'hidden') {
+            // On a fresh render there's nothing to repopulate yet, so fall
+            // back to the admin-configured default_value (e.g. a fixed
+            // "form_source" value) - usually left empty for fields an
+            // external script fills in client-side (gclid, UTM_*). On a
+            // re-render after a failed submission, keep whatever value the
+            // visitor's browser had already set, same as any other field.
+            $hidden_value = ($repop_value !== '' && !is_array($repop_value)) ? $repop_value : (string) ($config['default_value'] ?? '');
+            $tpl = str_replace('{value}', htmlspecialchars($hidden_value), $tpl);
         } else {
             $tpl = str_replace('{value}', htmlspecialchars(is_array($repop_value) ? '' : (string) $repop_value), $tpl);
         }
@@ -465,8 +491,33 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
     $wrapper = str_replace('{submit_label}', htmlspecialchars($form['submit_button_label'] ?: 'Senden'), $wrapper);
     $wrapper = str_replace('{hidden_csrf_token}', $hidden_csrf_token, $wrapper);
     $wrapper = str_replace('{sendtime}', (string) time(), $wrapper);
+    // The page's slug for the "Seiten-Informationen" checkbox
+    // (fmr_build_submission_meta()). On a fresh render this is the current
+    // page ($swifty_slug, set by app/routing.php); on a re-render after a
+    // failed submission (xhr.php passing $_POST as $repopulate) it must
+    // stay the originally submitted value instead - $swifty_slug at that
+    // point is the /xhr/plugins/former/ endpoint's own path, not the page
+    // the visitor actually filled the form in on.
+    $page_slug = $repopulate['fmr_page_slug'] ?? ($swifty_slug ?? '');
+    $wrapper = str_replace('{page_slug}', htmlspecialchars((string) $page_slug), $wrapper);
 
     return $wrapper;
+}
+
+/**
+ * Toggle button for one collapsed section of backend/reader.php's
+ * form_settings screen (name/status/captcha stay always visible above;
+ * everything else - appearance, auto-attached data, storage/mail,
+ * messages - is collapsed by default so the settings panel isn't one long
+ * scroll). Same data-bs-toggle="collapse" pattern already used in
+ * plugins/paddle-pay/backend/settings.php. Each section is its own
+ * independent collapse, not a true Bootstrap accordion - more than one can
+ * be open at once, which is fine since they're unrelated setting groups,
+ * not mutually exclusive choices.
+ */
+function fmr_settings_section_toggle(string $collapse_id, string $title): string {
+    return '<button type="button" class="btn btn-default btn-sm w-100 text-start d-flex justify-content-between align-items-center mb-2" data-bs-toggle="collapse" data-bs-target="#'.htmlspecialchars($collapse_id).'" aria-expanded="false" aria-controls="'.htmlspecialchars($collapse_id).'">'
+        .htmlspecialchars($title).' <i class="bi bi-chevron-down" aria-hidden="true"></i></button>';
 }
 
 /* -------------------------------------------------------------------
@@ -515,6 +566,16 @@ function fmr_render_field_row(array $field): string {
     $html .= '</div>';
 
     $is_static = !empty($type['is_static']);
+    // Hidden fields have no visible input for a visitor to leave blank or
+    // fill in - "Placeholder" is meaningless (nothing to display it in) and
+    // "Required" is actively dangerous: it would block submission entirely
+    // whenever the external script (GTM etc.) that's supposed to fill the
+    // value doesn't run or doesn't match, with no way for the visitor to
+    // notice or work around it. See global/xhr.php's required check, which
+    // skips field_type 'hidden' outright for the same reason - this is
+    // just keeping the admin UI from offering a checkbox that either does
+    // nothing (if xhr.php ignores it) or actively breaks the form.
+    $is_hidden = $type_key === 'hidden';
 
     $html .= '<div class="row g-2">';
     if ($is_static) {
@@ -528,16 +589,26 @@ function fmr_render_field_row(array $field): string {
     } else {
         $html .= '<div class="col-md-6"><input type="text" class="form-control form-control-sm" name="field_label['.$id.']" value="'.htmlspecialchars($field['label']).'" placeholder="'.htmlspecialchars($addon_lang['label_field_label'] ?? 'Label').'"></div>';
         $html .= '<div class="col-md-6"><input type="text" class="form-control form-control-sm" name="field_key['.$id.']" value="'.htmlspecialchars($field['field_key']).'" placeholder="'.htmlspecialchars($addon_lang['label_field_key'] ?? 'Field name').'"></div>';
-        $html .= '<div class="col-md-6"><input type="text" class="form-control form-control-sm" name="field_placeholder['.$id.']" value="'.htmlspecialchars($field['placeholder'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_placeholder'] ?? 'Placeholder').'"></div>';
-        $html .= '<div class="col-md-6 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_required['.$id.']" value="1" '.($field['required'] ? 'checked' : '').' id="fmr-req-'.$id.'"><label class="form-check-label" for="fmr-req-'.$id.'">'.htmlspecialchars($addon_lang['label_field_required'] ?? 'Required').'</label></div>';
+        // For hidden: no field_placeholder[id]/field_required[id]/
+        // field_css_class[id] inputs at all (skipped below too) - missing
+        // entries already default to ''/0 in backend/writer.php, no hidden
+        // fallback input needed to make that explicit.
+        if (!$is_hidden) {
+            $html .= '<div class="col-md-6"><input type="text" class="form-control form-control-sm" name="field_placeholder['.$id.']" value="'.htmlspecialchars($field['placeholder'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_placeholder'] ?? 'Placeholder').'"></div>';
+            $html .= '<div class="col-md-6 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_required['.$id.']" value="1" '.($field['required'] ? 'checked' : '').' id="fmr-req-'.$id.'"><label class="form-check-label" for="fmr-req-'.$id.'">'.htmlspecialchars($addon_lang['label_field_required'] ?? 'Required').'</label></div>';
+        }
     }
 
-    // Applies to every field type incl. static text blocks - both wrap
-    // their output in a single outer <div>, so a free-text class is always
-    // meaningful here, unlike the type-gated config_fields below. Appended
-    // to (never replacing) the wrapper's own hard-coded classes at render
-    // time - see fmr_render_form()/the {css_class} token in each field .tpl.
-    $html .= '<div class="col-md-12"><input type="text" class="form-control form-control-sm" name="field_css_class['.$id.']" value="'.htmlspecialchars($field['css_class'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_css_class'] ?? 'CSS class(es)').'"></div>';
+    // Applies to every other field type incl. static text blocks - both
+    // wrap their output in a single outer <div>, so a free-text class is
+    // always meaningful here, unlike the type-gated config_fields below.
+    // Appended to (never replacing) the wrapper's own hard-coded classes at
+    // render time - see fmr_render_form()/the {css_class} token in each
+    // field .tpl. Hidden fields have no wrapper (hidden.tpl is a bare
+    // <input>, no {css_class} token) - nothing for a class to attach to.
+    if (!$is_hidden) {
+        $html .= '<div class="col-md-12"><input type="text" class="form-control form-control-sm" name="field_css_class['.$id.']" value="'.htmlspecialchars($field['css_class'] ?? '').'" placeholder="'.htmlspecialchars($addon_lang['label_field_css_class'] ?? 'CSS class(es)').'"></div>';
+    }
 
     if (in_array('content', $type['config_fields'] ?? [], true)) {
         $html .= '<div class="col-md-12"><label class="form-label small">'.htmlspecialchars($addon_lang['label_field_content'] ?? 'Text').'</label><textarea class="form-control form-control-sm" rows="4" name="field_content['.$id.']">'.htmlspecialchars($config['content'] ?? '').'</textarea></div>';
@@ -564,6 +635,10 @@ function fmr_render_field_row(array $field): string {
     }
     if (in_array('multiple', $type['config_fields'] ?? [], true)) {
         $html .= '<div class="col-md-3 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_multiple['.$id.']" value="1" '.(!empty($config['multiple']) ? 'checked' : '').' id="fmr-multi-'.$id.'"><label class="form-check-label" for="fmr-multi-'.$id.'">'.htmlspecialchars($addon_lang['label_field_multiple'] ?? 'Allow multiple').'</label></div>';
+    }
+    if (in_array('default_value', $type['config_fields'] ?? [], true)) {
+        $html .= '<div class="col-md-6"><label class="form-label small">'.htmlspecialchars($addon_lang['label_field_default_value'] ?? 'Default value').'</label><input type="text" class="form-control form-control-sm" name="field_default_value['.$id.']" value="'.htmlspecialchars($config['default_value'] ?? '').'"></div>';
+        $html .= '<div class="col-md-12"><div class="form-text">'.htmlspecialchars($addon_lang['hint_field_default_value'] ?? 'Usually left empty for values an external script (e.g. GTM) fills in via matching id/name.').'</div></div>';
     }
 
     $html .= '</div>'; // row g-2

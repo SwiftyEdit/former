@@ -10,6 +10,7 @@ return [
         'disable_captcha' => 'TINYINT(1) DEFAULT 0',
         'include_user_data' => 'TINYINT(1) DEFAULT 0',
         'include_ip_referrer' => 'TINYINT(1) DEFAULT 0',
+        'include_page_info' => 'TINYINT(1) DEFAULT 0',
         'store_to_db' => 'TINYINT(1) DEFAULT 1',
         'send_mail' => 'TINYINT(1) DEFAULT 0',
         'mail_subject' => 'VARCHAR(255) NULL',
