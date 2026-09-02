@@ -311,6 +311,12 @@ function fmr_send_confirmation_mail(array $form, string $email, string $token): 
     $body = $form['confirm_mail_body'] ?: ('Bitte bestätigen Sie Ihre Angaben über den folgenden Link:<br><br><a href="{confirm_link}">{confirm_link}</a><br><br>'
         .'Der Link ist begrenzt gültig. Falls Sie das nicht selbst angefordert haben, können Sie diese E-Mail einfach ignorieren.');
 
+    // Same admin-authored-HTML trust level as text_block (both go through
+    // fmr_allowed_content_tags() when saved, backend/writer.php) - an admin
+    // typing plain multi-line text here still wants real line breaks in the
+    // sent mail, but pasted block HTML (e.g. a <table>) shouldn't get
+    // stray <br>s inserted into/around it. See fmr_smart_nl2br()'s docblock.
+    $body = fmr_smart_nl2br($body);
     $body = str_replace(['{confirm_link}', '{form_name}'], [htmlspecialchars($link), htmlspecialchars($form['name'])], $body);
 
     se_send_mail(['mail' => $email, 'name' => $email], $subject, $body);
@@ -588,6 +594,29 @@ function fmr_allowed_content_tags(): string {
     return '<p><br><small><strong><em><b><i><a><ul><ol><li>';
 }
 
+/**
+ * nl2br(), but skips content that already contains block-level HTML
+ * (a <p>, a pasted <table>, ...). Plain nl2br() has no concept of "this
+ * newline is just source-formatting whitespace inside markup" vs. "a real
+ * line break someone typed" - applied unconditionally to e.g. two `<p>`
+ * paragraphs written on separate lines, it inserts a `<br>` *between* them
+ * on top of the `<p>`s' own spacing (visibly doubled), and on a pasted
+ * multi-line `<table>` it litters stray `<br>` before/inside it. Browsers
+ * already collapse incidental whitespace/newlines around block-level markup
+ * on their own, so once such a tag is present it's safe to just leave the
+ * content untouched; only content that's plain text (or uses inline tags
+ * only, e.g. `<a>`/`<strong>`) still gets real `<br>`s for its line breaks.
+ * Same fix/reasoning as `pb_smart_nl2br()` in plugins/paperboy - ported
+ * here since former's text_block field and confirmation-mail body share the
+ * exact same admin-authored-HTML trust level (fmr_allowed_content_tags()).
+ */
+function fmr_smart_nl2br(string $html): string {
+    if (preg_match('/<(table|thead|tbody|tfoot|tr|td|th|div|p|ul|ol|li|h[1-6]|blockquote|pre|hr)\b/i', $html)) {
+        return $html;
+    }
+    return nl2br($html);
+}
+
 /* -------------------------------------------------------------------
  * Template-sets - per-form override of the shipped templates/ tree,
  * without touching the active SwiftyEdit theme or the plugin's own
@@ -698,7 +727,7 @@ function fmr_render_form(int $form_id, ?array $repopulate = null, string $banner
             // admin-authored whitelisted tags render as real markup.
             $content = strip_tags($config['content'] ?? '', fmr_allowed_content_tags());
             $tpl = str_replace('{css_class}', htmlspecialchars($field['css_class'] ?? ''), $tpl);
-            $fields_html .= str_replace('{content}', nl2br($content), $tpl);
+            $fields_html .= str_replace('{content}', fmr_smart_nl2br($content), $tpl);
             continue;
         }
 
