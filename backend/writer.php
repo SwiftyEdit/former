@@ -52,6 +52,26 @@ if (isset($_POST['save_form_settings'])) {
     $posted_set = $_POST['template_set'] ?? '';
     $template_set = in_array($posted_set, fmr_list_template_sets(), true) ? $posted_set : '';
 
+    // A pending (unconfirmed) submission needs somewhere durable to live
+    // between submit and confirm-click - "Bestätigung per E-Mail" implies
+    // "In Datenbank speichern" regardless of what that checkbox itself was
+    // set to, rather than leaving an unreachable combination the admin
+    // could otherwise pick (require_confirmation on, store_to_db off) that
+    // would silently never confirm anything.
+    $require_confirmation = isset($_POST['require_confirmation']) ? 1 : 0;
+    $store_to_db = ($require_confirmation || isset($_POST['store_to_db'])) ? 1 : 0;
+
+    // Only accept a confirm_email_field that actually names one of this
+    // form's own 'email' fields - same re-validate-against-reality idiom as
+    // template_set above. An empty value is valid too (auto-detect the
+    // first email field at submit time, see fmr_confirm_email_field_key()).
+    $email_field_keys = array_column(
+        array_filter($former_db->select('fields', ['field_key', 'field_type'], ['form_id' => $form_id]), fn ($f) => $f['field_type'] === 'email'),
+        'field_key'
+    );
+    $posted_confirm_field = $_POST['confirm_email_field'] ?? '';
+    $confirm_email_field = in_array($posted_confirm_field, $email_field_keys, true) ? $posted_confirm_field : '';
+
     $former_db->update('forms', [
         'name' => sanitizeUserInputs($_POST['name'] ?? ''),
         'description' => sanitizeUserInputs($_POST['description'] ?? ''),
@@ -60,7 +80,7 @@ if (isset($_POST['save_form_settings'])) {
         'include_user_data' => isset($_POST['include_user_data']) ? 1 : 0,
         'include_ip_referrer' => isset($_POST['include_ip_referrer']) ? 1 : 0,
         'include_page_info' => isset($_POST['include_page_info']) ? 1 : 0,
-        'store_to_db' => isset($_POST['store_to_db']) ? 1 : 0,
+        'store_to_db' => $store_to_db,
         'send_mail' => isset($_POST['send_mail']) ? 1 : 0,
         'mail_subject' => sanitizeUserInputs($_POST['mail_subject'] ?? ''),
         'mail_recipients' => json_encode($recipients),
@@ -68,6 +88,15 @@ if (isset($_POST['save_form_settings'])) {
         'error_message' => sanitizeUserInputs($_POST['error_message'] ?? ''),
         'submit_button_label' => sanitizeUserInputs($_POST['submit_button_label'] ?? ''),
         'template_set' => $template_set,
+        'require_confirmation' => $require_confirmation,
+        'confirm_email_field' => $confirm_email_field,
+        'confirm_mail_subject' => sanitizeUserInputs($_POST['confirm_mail_subject'] ?? ''),
+        // Whitelist-strip, not sanitizeUserInputs() - same reasoning as a
+        // text_block's 'content' above: this is admin-authored HTML meant
+        // to render (it needs at least an <a>), not visitor input.
+        'confirm_mail_body' => trim(strip_tags($_POST['confirm_mail_body'] ?? '', fmr_allowed_content_tags())),
+        'confirmed_message' => sanitizeUserInputs($_POST['confirmed_message'] ?? ''),
+        'confirm_expires_hours' => max(1, (int) ($_POST['confirm_expires_hours'] ?? 48)),
         'updated_at' => date('Y-m-d H:i:s'),
     ], ['id' => $form_id]);
 
@@ -142,6 +171,7 @@ if (isset($_POST['save_fields'])) {
     $multiples = $_POST['field_multiple'] ?? [];
     $contents = $_POST['field_content'] ?? [];
     $default_values = $_POST['field_default_value'] ?? [];
+    $log_consents = $_POST['field_log_consent'] ?? [];
 
     $field_types = fmr_field_types();
     $fields = $former_db->select('fields', '*', ['form_id' => $form_id]);
@@ -208,6 +238,9 @@ if (isset($_POST['save_fields'])) {
         }
         if (in_array('default_value', $config_fields, true)) {
             $config['default_value'] = sanitizeUserInputs($default_values[$field_id] ?? '');
+        }
+        if (in_array('log_consent', $config_fields, true)) {
+            $config['log_consent'] = isset($log_consents[$field_id]) ? 1 : 0;
         }
         if (in_array('content', $config_fields, true)) {
             // Whitelist-strip (not sanitizeUserInputs() - that also runs
@@ -276,6 +309,26 @@ if (isset($_POST['delete_submission'])) {
 
     // Reader.php removes the card client-side via hx-swap on this same
     // response - nothing to render, an empty 200 is enough.
+    exit;
+}
+
+if (isset($_POST['confirm_submission'])) {
+    $submission_id = (int) $_POST['confirm_submission'];
+    // Manual override for edge cases the automated confirm-link can't cover
+    // (e.g. a verbally-confirmed phone signup) - shares its whole effect
+    // (confirmed_at + notification mail) with a real confirm-click via
+    // fmr_confirm_pending_submission(). Already-confirmed / unknown ids are
+    // silently ignored (false return) rather than erroring - the card
+    // re-render below is correct either way.
+    fmr_confirm_pending_submission($submission_id);
+
+    $submission = $former_db->get('submissions', '*', ['id' => $submission_id]);
+    if ($submission) {
+        $labels = array_column($former_db->select('fields', ['field_key', 'label'], ['form_id' => $submission['form_id']]), 'label', 'field_key');
+        $form = $former_db->get('forms', '*', ['id' => $submission['form_id']]);
+        $form_names = $form ? [$form['id'] => $form['name']] : [];
+        echo fmr_render_submission_card($submission, false, $labels, $form_names, fmr_meta_labels(), $form);
+    }
     exit;
 }
 

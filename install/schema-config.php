@@ -19,6 +19,27 @@ return [
         'template_set' => 'VARCHAR(100) NULL',
         'success_message' => 'TEXT NULL',
         'error_message' => 'TEXT NULL',
+        // Double-opt-in (e-mail confirmation). When on, a submission is
+        // stored as "pending" first (see the submissions.confirm_* columns
+        // below) - the notification mail to mail_recipients and the
+        // former:submitted tracking event only fire once the visitor has
+        // clicked through the confirmation link, not at initial submit.
+        // Forces store_to_db on when saved (backend/writer.php) since a
+        // pending submission needs somewhere durable to live between submit
+        // and confirm.
+        'require_confirmation' => 'TINYINT(1) DEFAULT 0',
+        // field_key of the field whose submitted value is the confirmation
+        // address. Empty = auto-detect the form's first field of type
+        // 'email' at submit time (fmr_confirm_email_field_key()).
+        'confirm_email_field' => 'VARCHAR(100) NULL',
+        'confirm_mail_subject' => 'VARCHAR(255) NULL',
+        // Body of the confirmation mail; {confirm_link} and {form_name} are
+        // replaced at send time (see fmr_send_confirmation_mail()).
+        'confirm_mail_body' => 'TEXT NULL',
+        // Shown on the landing page once the visitor has actually clicked
+        // "confirm" there - the double-opt-in equivalent of success_message.
+        'confirmed_message' => 'TEXT NULL',
+        'confirm_expires_hours' => 'INTEGER DEFAULT 48',
         'created_at' => 'DATETIME DEFAULT CURRENT_TIMESTAMP',
         'updated_at' => 'DATETIME DEFAULT CURRENT_TIMESTAMP',
     ],
@@ -44,6 +65,15 @@ return [
         'meta' => 'TEXT NULL',
         'ip_address' => 'VARCHAR(45) NULL',
         'user_agent' => 'VARCHAR(255) NULL',
+        // Double-opt-in bookkeeping (only ever set when the owning form has
+        // require_confirmation on - NULL/empty for every normal submission).
+        // Only the SHA-256 hash of the token is stored, never the token
+        // itself - same idiom as a password-reset token, so a DB read alone
+        // can never produce a working confirmation link.
+        'confirm_token_hash' => 'VARCHAR(64) NULL',
+        'confirm_expires_at' => 'DATETIME NULL',
+        'confirm_sent_at' => 'DATETIME NULL',
+        'confirmed_at' => 'DATETIME NULL',
         'created_at' => 'DATETIME DEFAULT CURRENT_TIMESTAMP',
     ],
 

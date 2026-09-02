@@ -66,6 +66,7 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
 
     $recipients = $former_db->select('recipients', '*');
     $selected_recipients = json_decode($form['mail_recipients'] ?? '[]', true) ?: [];
+    $email_fields = $former_db->select('fields', ['field_key', 'label'], ['form_id' => $form_id, 'field_type' => 'email', 'ORDER' => ['sort_order' => 'ASC']]);
 
     echo '<div id="response"></div>';
     echo '<form hx-post="/admin-xhr/addons/plugin/former/write/" hx-target="#response" hx-swap="innerHTML">';
@@ -146,6 +147,36 @@ if (isset($_GET['show']) && $_GET['show'] === 'form_settings') {
         echo '<label class="form-check-label" for="fmr-r-'.$r['id'].'">'.htmlspecialchars($r['name']).' &lt;'.htmlspecialchars($r['email']).'&gt;</label></div>';
     }
     echo '</div>';
+    echo '</div>';
+
+    echo fmr_settings_section_toggle('fmrCollapseConfirmation', $addon_lang['title_confirmation']);
+    echo '<div class="collapse mb-3" id="fmrCollapseConfirmation">';
+
+    echo '<div class="mb-2 form-check"><input type="checkbox" class="form-check-input" name="require_confirmation" value="1" id="fmr-require-confirmation" '.($form['require_confirmation'] ? 'checked' : '').'>';
+    echo '<label class="form-check-label" for="fmr-require-confirmation">'.$addon_lang['label_require_confirmation'].'</label>';
+    echo '<div class="form-text">'.$addon_lang['hint_require_confirmation'].'</div></div>';
+
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_confirm_email_field'].'</label>';
+    echo '<select class="form-select" name="confirm_email_field">';
+    echo '<option value="">'.$addon_lang['option_confirm_email_field_auto'].'</option>';
+    foreach ($email_fields as $ef) {
+        $selected = ($form['confirm_email_field'] ?? '') === $ef['field_key'] ? 'selected' : '';
+        echo '<option value="'.htmlspecialchars($ef['field_key']).'" '.$selected.'>'.htmlspecialchars($ef['label']).'</option>';
+    }
+    echo '</select></div>';
+
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_confirm_mail_subject'].'</label>';
+    echo '<input type="text" class="form-control" name="confirm_mail_subject" value="'.htmlspecialchars($form['confirm_mail_subject'] ?? '').'"></div>';
+
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_confirm_mail_body'].'</label>';
+    echo '<textarea class="form-control" rows="4" name="confirm_mail_body">'.htmlspecialchars($form['confirm_mail_body'] ?? '').'</textarea>';
+    echo '<div class="form-text">'.$addon_lang['hint_confirm_mail_body'].'</div></div>';
+
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_confirmed_message'].'</label>';
+    echo '<textarea class="form-control" name="confirmed_message">'.htmlspecialchars($form['confirmed_message'] ?? '').'</textarea></div>';
+
+    echo '<div class="mb-3"><label class="form-label">'.$addon_lang['label_confirm_expires_hours'].'</label>';
+    echo '<input type="number" min="1" class="form-control" name="confirm_expires_hours" value="'.htmlspecialchars((string) ($form['confirm_expires_hours'] ?? 48)).'"></div>';
     echo '</div>';
 
     echo fmr_settings_section_toggle('fmrCollapseMessages', $addon_lang['title_messages']);
@@ -265,7 +296,10 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
     foreach ($all_fields as $f) {
         $labels_by_form[(int) $f['form_id']][$f['field_key']] = $f['label'];
     }
-    $form_names = array_column($former_db->select('forms', ['id', 'name']), 'name', 'id');
+    // Full rows (not just id/name) so fmr_render_submission_card() can show
+    // the confirmation badge/button without a per-card lookup.
+    $forms_by_id = array_column($former_db->select('forms', ['id', 'name', 'require_confirmation']), null, 'id');
+    $form_names = array_column($forms_by_id, 'name', 'id');
     $meta_labels = fmr_meta_labels();
 
     $submission_conditions = $form_id > 0 ? ['form_id' => $form_id] : [];
@@ -281,54 +315,12 @@ if (isset($_GET['show']) && $_GET['show'] === 'submissions') {
     }
 
     foreach ($submissions as $submission) {
-        $data = json_decode($submission['data'], true) ?: [];
-        $meta = json_decode($submission['meta'] ?? '', true) ?: [];
-        $files = $former_db->select('submission_files', '*', ['submission_id' => $submission['id']]);
         $labels = $labels_by_form[(int) $submission['form_id']] ?? [];
-
-        echo '<div class="card mb-2"><div class="card-body">';
-        echo '<div class="d-flex justify-content-between align-items-start mb-2">';
-        echo '<div class="text-muted small">';
+        $form = $forms_by_id[(int) $submission['form_id']] ?? null;
         // Which form this belongs to only needs saying in the unfiltered
         // "all forms" view - filtered to one form, it's already implied by
         // the filter dropdown in submissions.php.
-        if ($form_id === 0) {
-            $form_name = $form_names[(int) $submission['form_id']] ?? ('#'.$submission['form_id']);
-            echo '<span class="badge text-bg-secondary me-2">'.htmlspecialchars($form_name).'</span>';
-        }
-        echo $addon_lang['th_submitted_at'].': '.htmlspecialchars($submission['created_at']).' — '.htmlspecialchars($submission['ip_address'] ?? '').'</div>';
-        // Spam etc. - deletes the submission row, its meta, any uploaded
-        // files (DB rows + the actual files on disk) in one go, see
-        // "delete_submission" in backend/writer.php. hx-swap removes just
-        // this card, no full-list reload needed.
-        echo '<button type="button" class="btn btn-sm btn-default text-danger flex-shrink-0"
-            hx-post="/admin-xhr/addons/plugin/former/write/"
-            hx-vals=\'{"delete_submission":"'.$submission['id'].'","csrf_token":"'.$_SESSION['token'].'"}\'
-            hx-confirm="'.htmlspecialchars($addon_lang['msg_confirm_delete_submission']).'"
-            hx-target="closest .card" hx-swap="outerHTML swap:0s">'.$addon_lang['btn_delete'].'</button>';
-        echo '</div>'; // d-flex
-        echo '<table class="table table-sm mb-2">';
-        foreach ($data as $key => $value) {
-            $label = $labels[$key] ?? $key;
-            echo '<tr><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars(is_array($value) ? implode(', ', $value) : (string) $value).'</td></tr>';
-        }
-        // Auto-attached data (fmr_build_submission_meta()), rendered muted
-        // to visually set it apart from the admin-defined fields above.
-        foreach ($meta as $key => $value) {
-            $label = $meta_labels[$key] ?? $key;
-            echo '<tr class="text-muted"><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
-        }
-        echo '</table>';
-
-        if ($files) {
-            echo '<div>'.$addon_lang['th_files'].': ';
-            foreach ($files as $f) {
-                echo '<a class="btn btn-sm btn-default me-1" href="/xhr/plugins/former/?download_file='.$f['id'].'">'.htmlspecialchars($f['original_filename']).'</a>';
-            }
-            echo '</div>';
-        }
-
-        echo '</div></div>';
+        echo fmr_render_submission_card($submission, $form_id === 0, $labels, $form_names, $meta_labels, $form);
     }
 
     $total_pages = (int) ceil($total / $per_page);

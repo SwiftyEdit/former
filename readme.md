@@ -42,6 +42,11 @@ The form ID is shown in the form list in the backend (Addons > Former).
 - Optionally, per form: auto-attach the logged-in user (user ID, username, e-mail), the
   visitor's IP address/referrer/browser, and/or the page the form was submitted from and
   when, to every submission - see below
+- Lightweight consent-proof logging: a checkbox field can be flagged to record its exact
+  wording, timestamp and IP whenever it's ticked, independent of the auto-attached data above
+  - see below
+- Optional e-mail double-opt-in per form: a submission is held "pending" until the visitor
+  clicks a confirmation link sent to their own address - see below
 - Built-in "Help" tab in the plugin's own backend UI (`Formulare | Einstellungen | Hilfe`),
   documented per language under `docs/<lang>/` - same pattern as `plugins/paddle-pay`
 
@@ -68,6 +73,30 @@ There is deliberately no built-in privacy-notice text for these - use a "Text / 
 field in the form itself if you want to inform submitters, and make sure your own privacy
 policy covers what you configure here. Former only collects and forwards what a form is
 explicitly opted into.
+
+## Consent-proof logging and e-mail double-opt-in
+
+For cases where you need to show that the submitter really is who they claim (a newsletter
+sign-up, a survey participant), two independent mechanisms are available - see
+`docs/<lang>/confirmation.md` for the full admin-facing walkthrough.
+
+- **Consent-proof logging**: any "Checkbox (consent)" field can have "Record as consent
+  proof" turned on. When checked at submit time, the field's exact label text, a timestamp
+  and the sender's IP are added to the submission's `meta.consent_log` (and shown as their
+  own section in the submissions list / notification mail) - independent of the auto-attached
+  data checkboxes above, and without any e-mail round-trip.
+- **E-mail confirmation (double opt-in)**: turned on per form under Settings → "Bestätigung
+  per E-Mail". A submission is stored as pending (forces "store in database" on) and a
+  confirmation mail is sent to the address from the form's chosen e-mail field. The
+  notification mail to `mail_recipients` and the `former:submitted` event below are **not**
+  fired at the original submit for such a form - both are deferred until the visitor clicks
+  through the confirmation link and then clicks "confirm" on its landing page (deliberately
+  not auto-confirmed on GET, so an e-mail security scanner pre-fetching the link can't count
+  as a confirmation). That landing page (`templates/confirm-page.tpl`) is a standalone HTML
+  document outside the site's normal theme, so a site-wide GTM snippet embedded in the theme
+  will *not* be present there - if a conversion should only fire on actual confirmation,
+  trigger it some other way (e.g. off the notification mail) rather than assuming `gtag`/
+  `dataLayer` are available on that page.
 
 ## Frontend event: `former:submitted`
 

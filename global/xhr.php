@@ -49,6 +49,146 @@ if (isset($_GET['download_file'])) {
 }
 
 /* -------------------------------------------------------------------
+ * Double-opt-in: confirmation landing page (GET, from the mail link),
+ * the actual confirm click (POST, from that landing page's own button -
+ * deliberately not auto-confirmed on the GET itself, since e-mail security
+ * scanners that pre-fetch links in transit would otherwise "confirm" a
+ * signup nobody ever consciously clicked), and "resend the confirmation
+ * mail" (POST, from the pending-confirmation card htmx-swapped into the
+ * original page right after submitting). None of these are part of the
+ * normal frontend submission flow further below.
+ * ---------------------------------------------------------------- */
+
+/**
+ * Renders the right rejection state (invalid / already-confirmed / expired)
+ * for a token lookup, or null if the submission is real and still pending -
+ * shared between the GET landing page and the POST confirm click below,
+ * which both need to reject the same three ways before doing anything else.
+ */
+$fmr_render_token_rejection = function (?array $submission): ?string {
+    if (!$submission) {
+        return fmr_render_confirm_page('Ungültiger Link', 'Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.');
+    }
+    if (!empty($submission['confirmed_at'])) {
+        return fmr_render_confirm_page('Bereits bestätigt', 'Diese Anmeldung wurde bereits bestätigt - es ist nichts weiter zu tun.');
+    }
+    if (!empty($submission['confirm_expires_at']) && strtotime($submission['confirm_expires_at']) < time()) {
+        return fmr_render_confirm_page('Link abgelaufen', 'Dieser Bestätigungslink ist leider abgelaufen. Bitte senden Sie das Formular erneut ab.');
+    }
+    return null;
+};
+
+if (isset($_GET['fmr_confirm'])) {
+    $token = (string) $_GET['fmr_confirm'];
+    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
+
+    $rejection = $fmr_render_token_rejection($submission);
+    if ($rejection !== null) {
+        echo $rejection;
+    } else {
+        // csrf_token is required here too - app/bootstrap.php's global
+        // se_validate_token() gate runs for every non-empty $_POST before
+        // former's own code ever sees the request, and would otherwise
+        // redirect this plain (non-htmx) form straight to / on submit.
+        // $hidden_csrf_token was generated for *this* GET request's own
+        // session (app/bootstrap.php always ensures $_SESSION['token']
+        // exists) - the click below happens in the same browser/session, so
+        // it still matches at POST time regardless of which device the
+        // visitor originally filled the form in on.
+        $action = '<form method="post" action="/xhr/plugins/former/">'
+            .'<input type="hidden" name="fmr_do_confirm" value="1">'
+            .'<input type="hidden" name="fmr_confirm_token" value="'.htmlspecialchars($token).'">'
+            .$hidden_csrf_token
+            .'<button type="submit">Jetzt bestätigen</button>'
+            .'</form>';
+        echo fmr_render_confirm_page('Bitte bestätigen', 'Bitte bestätigen Sie mit einem Klick auf den Button, dass Sie diese Anmeldung selbst vorgenommen haben.', $action);
+    }
+    exit;
+}
+
+if (isset($_POST['fmr_do_confirm'])) {
+    $token = (string) ($_POST['fmr_confirm_token'] ?? '');
+    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
+
+    $rejection = $fmr_render_token_rejection($submission);
+    if ($rejection !== null) {
+        echo $rejection;
+        exit;
+    }
+
+    fmr_confirm_pending_submission((int) $submission['id']);
+
+    $submission_full = $former_db->get('submissions', ['form_id', 'data', 'meta'], ['id' => $submission['id']]);
+    $form = $former_db->get('forms', '*', ['id' => $submission_full['form_id']]);
+
+    // Fired here - not at the original submit - since this is the point a
+    // visitor has actually proven the submission was them. Note this page
+    // has no site theme/tag-manager snippet of its own (see
+    // fmr_render_confirm_page()'s docblock); a listener on document that's
+    // present here regardless will still catch it, GTM's own snippet won't.
+    $tracking_json = json_encode([
+        'form_id' => (int) $submission_full['form_id'],
+        'form_name' => $form['name'] ?? '',
+        'submission_id' => (int) $submission['id'],
+        'data' => json_decode($submission_full['data'] ?? '', true) ?: [],
+        'meta' => json_decode($submission_full['meta'] ?? '', true) ?: [],
+    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+    $tracking_script = '<script>document.dispatchEvent(new CustomEvent(\'former:submitted\', { bubbles: true, detail: '.$tracking_json.' }));</script>';
+
+    $message = $form['confirmed_message'] ?: 'Vielen Dank, Ihre Anmeldung wurde erfolgreich bestätigt.';
+    echo fmr_render_confirm_page('Bestätigt', $message, '', $tracking_script, $form['template_set'] ?? null);
+    exit;
+}
+
+if (isset($_POST['fmr_resend_confirm'])) {
+    $submission_id = (int) ($_POST['submission_id'] ?? 0);
+
+    // Only ever resent for a submission this exact browser session itself
+    // just created (populated further below, right after the original
+    // pending submission is stored) - trusting a bare client-supplied
+    // submission_id here would let anyone enumerate ids and trigger a mail
+    // send to an address they don't control, not just re-send to whoever
+    // originally submitted it.
+    if (empty($_SESSION['fmr_pending_confirm'][$submission_id])) {
+        exit;
+    }
+
+    $submission = $former_db->get('submissions', '*', ['id' => $submission_id]);
+    $form = $submission ? $former_db->get('forms', '*', ['id' => $submission['form_id']]) : null;
+
+    if (!$submission || !$form || !empty($submission['confirmed_at'])) {
+        exit;
+    }
+
+    // Rate-limited rather than actually re-sending on every click - a burst
+    // of impatient clicks shouldn't turn into a burst of mails.
+    $throttled = !empty($submission['confirm_sent_at']) && (time() - strtotime($submission['confirm_sent_at'])) < 60;
+
+    if (!$throttled) {
+        $clean = json_decode($submission['data'], true) ?: [];
+        $email_field = fmr_confirm_email_field_key($form, $former_db->select('fields', '*', ['form_id' => $form['id']]));
+        $email = $email_field ? ($clean[$email_field] ?? '') : '';
+
+        if ($email !== '') {
+            [$token, $hash] = fmr_generate_confirm_token();
+            $former_db->update('submissions', [
+                'confirm_token_hash' => $hash,
+                'confirm_expires_at' => date('Y-m-d H:i:s', time() + ((int) ($form['confirm_expires_hours'] ?: 48)) * 3600),
+                'confirm_sent_at' => date('Y-m-d H:i:s'),
+            ], ['id' => $submission_id]);
+            fmr_send_confirmation_mail($form, $email, $token);
+        }
+    }
+
+    $pending_tpl = file_get_contents(fmr_resolve_template('pending-confirmation.tpl', $form['template_set'] ?? null));
+    $pending_tpl = str_replace('{form_id}', (string) $form['id'], $pending_tpl);
+    $pending_tpl = str_replace('{message}', htmlspecialchars('Die Bestätigungs-Mail wurde erneut gesendet. Bitte prüfen Sie auch Ihren Spam-Ordner.'), $pending_tpl);
+    $pending_tpl = str_replace('{resend_html}', fmr_render_resend_form((int) $form['id'], $submission_id, $hidden_csrf_token), $pending_tpl);
+    echo $pending_tpl;
+    exit;
+}
+
+/* -------------------------------------------------------------------
  * Frontend form submission
  * ---------------------------------------------------------------- */
 
@@ -144,6 +284,21 @@ foreach ($fields as $field) {
     $clean[$key] = $value;
 }
 
+/* 3b. Double-opt-in needs a real address to send the confirmation link to -
+ * checked here, alongside the other field errors, so the visitor sees it
+ * the same way as any other validation problem and can fix it before
+ * resubmitting, rather than failing silently later at persist time. */
+$requires_confirmation = !empty($form['require_confirmation']);
+$confirm_email_field = null;
+$confirm_email = '';
+if ($requires_confirmation) {
+    $confirm_email_field = fmr_confirm_email_field_key($form, $fields);
+    $confirm_email = $confirm_email_field ? ($clean[$confirm_email_field] ?? '') : '';
+    if ($confirm_email === '' || !filter_var($confirm_email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'Es wird eine gültige E-Mail-Adresse benötigt, um die Anmeldung zu bestätigen.';
+    }
+}
+
 if ($errors) {
     $banner = '<div class="alert alert-danger mb-3"><ul class="mb-0"><li>'.implode('</li><li>', array_map('htmlspecialchars', $errors)).'</li></ul></div>';
     echo fmr_render_form($form_id, $_POST, $banner);
@@ -223,15 +378,39 @@ if ($errors) {
 /* 5. Persist (DB) --------------------------------------------------------- */
 $meta = fmr_build_submission_meta($form);
 
+// Lightweight consent proof (fmr_build_consent_log()) - independent of the
+// require_confirmation flow below, and of the "auto-attached data"
+// checkboxes above: this is tied to one specific checkbox's wording, not
+// the whole submission.
+$consent_log = fmr_build_consent_log($fields, $clean);
+if ($consent_log) {
+    $meta['consent_log'] = $consent_log;
+}
+
 $submission_id = null;
-if ((int) $form['store_to_db'] === 1) {
-    $former_db->insert('submissions', [
+$confirm_token = null;
+// require_confirmation forces store_to_db on when the form is saved
+// (backend/writer.php) - the `|| $requires_confirmation` here is just
+// defense in depth against a form row that ended up with that
+// combination some other way (e.g. a direct DB edit), since a pending
+// confirmation with nowhere durable to live could never be confirmed.
+if ((int) $form['store_to_db'] === 1 || $requires_confirmation) {
+    $insert = [
         'form_id' => $form_id,
         'data' => json_encode($clean, JSON_UNESCAPED_UNICODE),
         'meta' => $meta ? json_encode($meta, JSON_UNESCAPED_UNICODE) : null,
         'ip_address' => $_SERVER['REMOTE_ADDR'] ?? null,
         'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
-    ]);
+    ];
+
+    if ($requires_confirmation) {
+        [$confirm_token, $hash] = fmr_generate_confirm_token();
+        $insert['confirm_token_hash'] = $hash;
+        $insert['confirm_expires_at'] = date('Y-m-d H:i:s', time() + ((int) ($form['confirm_expires_hours'] ?: 48)) * 3600);
+        $insert['confirm_sent_at'] = date('Y-m-d H:i:s');
+    }
+
+    $former_db->insert('submissions', $insert);
     $submission_id = $former_db->id();
 
     foreach ($uploaded_files as $field_key => $files) {
@@ -248,7 +427,26 @@ if ((int) $form['store_to_db'] === 1) {
     }
 }
 
-/* 6. Respond to the visitor immediately, THEN send mail(s) --------------- */
+/* 6. Respond to the visitor --------------------------------------------- */
+
+if ($requires_confirmation) {
+    // Nothing is final yet: no notification mail to mail_recipients, no
+    // former:submitted tracking event - both are deferred to the
+    // confirm-click handler above (fmr_confirm_pending_submission()), fired
+    // only once the visitor has actually proven the submission was them.
+    fmr_send_confirmation_mail($form, $confirm_email, $confirm_token);
+
+    // Session-scoped whitelist for the "resend" button - see
+    // fmr_resend_confirm above for why this matters.
+    $_SESSION['fmr_pending_confirm'][$submission_id] = true;
+
+    $pending_tpl = file_get_contents(fmr_resolve_template('pending-confirmation.tpl', $form['template_set'] ?? null));
+    $pending_tpl = str_replace('{form_id}', (string) $form_id, $pending_tpl);
+    $pending_tpl = str_replace('{message}', htmlspecialchars('Bitte bestätigen Sie Ihre E-Mail-Adresse: Wir haben Ihnen eine Nachricht mit einem Bestätigungslink an '.$confirm_email.' geschickt.'), $pending_tpl);
+    $pending_tpl = str_replace('{resend_html}', fmr_render_resend_form($form_id, $submission_id, $hidden_csrf_token), $pending_tpl);
+    echo $pending_tpl;
+    exit;
+}
 
 /* Frontend tracking hook: a `former:submitted` CustomEvent is dispatched
  * (see templates/success.tpl) from an inline <script> in the swapped-in
@@ -312,55 +510,11 @@ if (function_exists('fastcgi_finish_request')) {
     @flush();
 }
 
-$recipients = $former_db->select('recipients', ['id', 'name', 'email'], ['id' => $recipient_ids]);
-$subject = $form['mail_subject'] ?: ('Neue Formular-Einsendung: '.$form['name']);
-
-$body = '<table cellpadding="5" cellspacing="0" border="1" width="100%">';
-foreach ($fields as $field) {
-    $type = $field_types[$field['field_type']] ?? [];
-    if (!empty($type['has_upload']) || !empty($type['is_static'])) {
-        continue;
-    }
-    $v = $clean[$field['field_key']] ?? '';
-    $body .= '<tr><td>'.htmlspecialchars($field['label']).'</td><td>'.htmlspecialchars(is_array($v) ? implode(', ', $v) : (string) $v).'</td></tr>';
-}
-if ($meta) {
-    $meta_labels = fmr_meta_labels();
-    foreach ($meta as $key => $value) {
-        $body .= '<tr><td>'.htmlspecialchars($meta_labels[$key] ?? $key).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
-    }
-}
-$body .= '</table>';
-
-// Uploaded files are attached to the notification mail. se_send_mail()
-// has no attachment support, so fmr_send_mail_with_attachments() (a
-// local PHPMailer wrapper mirroring the same SMTP config) is used
-// whenever the submission has at least one stored file.
-$mail_attachments = [];
-foreach ($uploaded_files as $files) {
-    foreach ($files as $f) {
-        $mail_attachments[] = [
-            'path' => $upload_dir.$f['stored'],
-            'name' => $f['original'],
-        ];
-    }
-}
-
-foreach ($recipients as $i => $r) {
-    if ($mail_attachments) {
-        fmr_send_mail_with_attachments(['mail' => $r['email'], 'name' => $r['name']], $subject, $body, $mail_attachments);
-    } else {
-        se_send_mail(['mail' => $r['email'], 'name' => $r['name']], $subject, $body);
-    }
-
-    if (!function_exists('fastcgi_finish_request') && $i < count($recipients) - 1) {
-        echo '<!-- . -->';
-        if (ob_get_level() > 0) {
-            @ob_flush();
-        }
-        @flush();
-    }
-}
+// allow_heartbeat: true - the visitor's own response was already echoed and
+// detached (fastcgi_finish_request(), or the manual flush above) before we
+// get here, so it's safe for a non-fastcgi fallback to interleave heartbeat
+// comments after it.
+fmr_send_submission_notification($form, $fields, $clean, $meta, $uploaded_files, $upload_dir, true);
 
 if ((int) $form['store_to_db'] !== 1) {
     fmr_delete_uploaded_files($uploaded_files, $upload_dir);

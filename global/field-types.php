@@ -59,7 +59,11 @@ function fmr_field_types(): array {
             'template' => 'checkbox.tpl',
             'has_options' => false,
             'has_upload' => false,
-            'config_fields' => [],
+            // 'log_consent': lightweight proof-of-consent logging, independent
+            // of the form-wide "auto-attached data" checkboxes (which log IP/
+            // timestamp for the whole submission, not tied to one specific
+            // consent statement). See fmr_build_consent_log() in functions.php.
+            'config_fields' => ['log_consent'],
         ],
         'file' => [
             'label' => $addon_lang['field_type_file'] ?? 'File upload',

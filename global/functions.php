@@ -186,6 +186,310 @@ function fmr_meta_labels(): array {
 }
 
 /* -------------------------------------------------------------------
+ * Consent-proof logging (lightweight, no e-mail round-trip). A checkbox
+ * field with its 'log_consent' config on records a standalone proof-of-
+ * consent entry (the exact label text shown at submission time + timestamp
+ * + IP), independent of the form-wide "auto-attached data" checkboxes above
+ * (which log IP/timestamp for the *whole* submission, not tied to one
+ * specific consent statement, and may well be off - e.g. for privacy
+ * reasons on a form that otherwise has no reason to keep IP addresses).
+ * Meant for the "I confirm this is genuinely me" case that doesn't need a
+ * full e-mail double-opt-in round-trip, e.g. a survey participation
+ * checkbox. See global/xhr.php for where this is called and merged into a
+ * submission's meta, and fmr_send_submission_notification() /
+ * backend/reader.php for where the result is rendered.
+ * ---------------------------------------------------------------- */
+
+/**
+ * @param array $fields This form's field rows (fields table)
+ * @param array $clean  Already-sanitized submitted values, keyed by field_key
+ * @return array<int, array{field_key:string,label:string,checked_at:string,ip:?string}>
+ */
+function fmr_build_consent_log(array $fields, array $clean): array {
+    $log = [];
+
+    foreach ($fields as $field) {
+        if ($field['field_type'] !== 'checkbox') {
+            continue;
+        }
+        $config = json_decode($field['config'] ?? '{}', true) ?: [];
+        if (empty($config['log_consent'])) {
+            continue;
+        }
+
+        $key = $field['field_key'];
+        $value = $clean[$key] ?? '';
+        if ($value === '' || $value === '0') {
+            continue; // box wasn't checked - nothing to log
+        }
+
+        $log[] = [
+            'field_key' => $key,
+            // The exact wording shown to the visitor, not just the field
+            // name - what a consent statement actually said matters as much
+            // as the fact that it was ticked, and a field's label can change
+            // later while this submission's record should stay as it was.
+            'label' => $field['label'],
+            'checked_at' => date('Y-m-d H:i:s'),
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
+        ];
+    }
+
+    return $log;
+}
+
+/* -------------------------------------------------------------------
+ * Double-opt-in (e-mail confirmation). A submission from a form with
+ * require_confirmation on is stored "pending" (confirmed_at NULL) and only
+ * becomes final - the notification mail to mail_recipients sent, the
+ * former:submitted tracking event fired - once the visitor has clicked
+ * through the confirmation link sent to their own submitted address. See
+ * global/xhr.php for the submit/confirm/resend request handling that uses
+ * these.
+ * ---------------------------------------------------------------- */
+
+/**
+ * Which field on a form supplies the confirmation address: the admin's
+ * explicit choice (forms.confirm_email_field) if it still names a real
+ * e-mail field on this form, else the first field of type 'email' in field
+ * order.
+ */
+function fmr_confirm_email_field_key(array $form, array $fields): ?string {
+    $configured = $form['confirm_email_field'] ?? '';
+    if ($configured !== '') {
+        foreach ($fields as $field) {
+            if ($field['field_key'] === $configured && $field['field_type'] === 'email') {
+                return $configured;
+            }
+        }
+    }
+
+    foreach ($fields as $field) {
+        if ($field['field_type'] === 'email') {
+            return $field['field_key'];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * One-time confirmation token. Only the SHA-256 hash is ever meant to be
+ * persisted (submissions.confirm_token_hash) - the plaintext exists just
+ * long enough to build the mail link, same idiom as a password-reset token,
+ * so a database read alone can never produce a working confirmation link.
+ *
+ * @return array{0:string,1:string} [plaintext token, hash]
+ */
+function fmr_generate_confirm_token(): array {
+    $token = bin2hex(random_bytes(32));
+    return [$token, hash('sha256', $token)];
+}
+
+/**
+ * Absolute confirmation link for a token. Has to be absolute (unlike the
+ * relative /xhr/plugins/former/... URLs used elsewhere in this plugin, e.g.
+ * the file-download link in backend/reader.php) since it's opened from an
+ * e-mail client, not a page on this site - same $se_settings domain lookup
+ * as the account-unlock mail in app/functions/functions.user.php.
+ */
+function fmr_confirm_link(string $token): string {
+    global $se_settings;
+    $base = rtrim($se_settings['prefs_cms_ssl_domain'] ?? ($se_settings['prefs_cms_domain'] ?? ''), '/');
+    return $base.'/xhr/plugins/former/?fmr_confirm='.$token;
+}
+
+/**
+ * Sends (or resends) the confirmation mail for one pending submission.
+ * Caller is responsible for having just written a fresh confirm_token_hash/
+ * confirm_expires_at matching $token.
+ */
+function fmr_send_confirmation_mail(array $form, string $email, string $token): void {
+    $link = fmr_confirm_link($token);
+
+    $subject = $form['confirm_mail_subject'] ?: ('Bitte bestätigen Sie Ihre Anmeldung: '.$form['name']);
+    $body = $form['confirm_mail_body'] ?: ('Bitte bestätigen Sie Ihre Angaben über den folgenden Link:<br><br><a href="{confirm_link}">{confirm_link}</a><br><br>'
+        .'Der Link ist begrenzt gültig. Falls Sie das nicht selbst angefordert haben, können Sie diese E-Mail einfach ignorieren.');
+
+    $body = str_replace(['{confirm_link}', '{form_name}'], [htmlspecialchars($link), htmlspecialchars($form['name'])], $body);
+
+    se_send_mail(['mail' => $email, 'name' => $email], $subject, $body);
+}
+
+/**
+ * The notification mail to a form's mail_recipients, plus its attachments -
+ * factored out of global/xhr.php so both the immediate path (no
+ * confirmation required) and the deferred one (fired only once a pending
+ * submission is actually confirmed) share one implementation.
+ *
+ * $allow_heartbeat must stay false for any caller that hasn't itself
+ * already sent+flushed the visitor-facing response first (the confirm-
+ * click and manual-admin-confirm paths via fmr_confirm_pending_submission()
+ * both send this notification as a synchronous side effect, before their
+ * own HTML is echoed) - otherwise, on a server without
+ * fastcgi_finish_request(), the heartbeat's HTML comments would be emitted
+ * *before* that response and corrupt it. The plain frontend-submission path
+ * in global/xhr.php has already echoed+detached by the time it calls this,
+ * so it's the only caller that passes true.
+ */
+function fmr_send_submission_notification(array $form, array $fields, array $clean, array $meta, array $uploaded_files, string $upload_dir, bool $allow_heartbeat = false): void {
+    if ((int) $form['send_mail'] !== 1) {
+        return;
+    }
+
+    global $former_db;
+
+    $recipient_ids = json_decode($form['mail_recipients'] ?? '[]', true) ?: [];
+    if (!$recipient_ids) {
+        return;
+    }
+
+    $field_types = fmr_field_types();
+    $subject = $form['mail_subject'] ?: ('Neue Formular-Einsendung: '.$form['name']);
+
+    $body = '<table cellpadding="5" cellspacing="0" border="1" width="100%">';
+    foreach ($fields as $field) {
+        $type = $field_types[$field['field_type']] ?? [];
+        if (!empty($type['has_upload']) || !empty($type['is_static'])) {
+            continue;
+        }
+        $v = $clean[$field['field_key']] ?? '';
+        $body .= '<tr><td>'.htmlspecialchars($field['label']).'</td><td>'.htmlspecialchars(is_array($v) ? implode(', ', $v) : (string) $v).'</td></tr>';
+    }
+    $meta_labels = fmr_meta_labels();
+    foreach ($meta as $key => $value) {
+        if ($key === 'consent_log') {
+            continue; // rendered as its own section below, not a flat row
+        }
+        $body .= '<tr><td>'.htmlspecialchars($meta_labels[$key] ?? $key).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
+    }
+    $body .= '</table>';
+
+    if (!empty($meta['consent_log']) && is_array($meta['consent_log'])) {
+        $body .= '<p><strong>Einwilligungs-Nachweis:</strong></p><ul>';
+        foreach ($meta['consent_log'] as $c) {
+            $body .= '<li>'.htmlspecialchars($c['label'] ?? $c['field_key'] ?? '').' — '.htmlspecialchars($c['checked_at'] ?? '').' (IP '.htmlspecialchars($c['ip'] ?? '').')</li>';
+        }
+        $body .= '</ul>';
+    }
+
+    $mail_attachments = [];
+    foreach ($uploaded_files as $files) {
+        foreach ($files as $f) {
+            $mail_attachments[] = [
+                'path' => $upload_dir.$f['stored'],
+                'name' => $f['original'],
+            ];
+        }
+    }
+
+    $recipients = $former_db->select('recipients', ['id', 'name', 'email'], ['id' => $recipient_ids]);
+    foreach ($recipients as $i => $r) {
+        if ($mail_attachments) {
+            fmr_send_mail_with_attachments(['mail' => $r['email'], 'name' => $r['name']], $subject, $body, $mail_attachments);
+        } else {
+            se_send_mail(['mail' => $r['email'], 'name' => $r['name']], $subject, $body);
+        }
+
+        // Heartbeat between sequential sends so a slow SMTP round-trip over
+        // several recipients doesn't sit silently until it trips a
+        // web-server read/inactivity timeout - only needed when the caller
+        // couldn't detach via fastcgi_finish_request() beforehand (see both
+        // call sites in global/xhr.php).
+        if ($allow_heartbeat && !function_exists('fastcgi_finish_request') && $i < count($recipients) - 1) {
+            echo '<!-- . -->';
+            if (ob_get_level() > 0) {
+                @ob_flush();
+            }
+            @flush();
+        }
+    }
+}
+
+/**
+ * Renders the standalone confirm-link landing page (templates/confirm-
+ * page.tpl, or a template-set override) for one of its fixed states -
+ * prompt / already-confirmed / expired / invalid / success. Unlike the
+ * rest of this plugin's templates, this one is a full HTML document: it's
+ * opened as a fresh top-level navigation from an e-mail client, not
+ * htmx-swapped into an existing page, so there's no surrounding site theme
+ * here to inherit CSS - or a tag-manager snippet - from. If a form's
+ * "confirmed" tracking event needs to reach something like GTM, that has
+ * to be wired up independently of this page (e.g. off the notification
+ * mail instead), not assumed to just work here.
+ */
+function fmr_render_confirm_page(string $heading, string $message, string $action_html = '', string $tracking_script = '', ?string $set = null): string {
+    $tpl = file_get_contents(fmr_resolve_template('confirm-page.tpl', $set));
+    $tpl = str_replace('{title}', htmlspecialchars($heading), $tpl);
+    $tpl = str_replace('{heading}', htmlspecialchars($heading), $tpl);
+    $tpl = str_replace('{message}', htmlspecialchars($message), $tpl);
+    $tpl = str_replace('{action_html}', $action_html, $tpl);
+    $tpl = str_replace('{tracking_script}', $tracking_script, $tpl);
+    return $tpl;
+}
+
+/**
+ * The "didn't get the mail? resend" htmx form embedded in the pending-
+ * confirmation card (templates/pending-confirmation.tpl). $submission_id
+ * travels in a plain POST field - see fmr_resend_confirm handling in
+ * global/xhr.php for why that's safe (only ever honored for a submission
+ * the same browser session itself just created, via
+ * $_SESSION['fmr_pending_confirm']).
+ */
+function fmr_render_resend_form(int $form_id, int $submission_id, string $hidden_csrf_token): string {
+    return '<form hx-post="/xhr/plugins/former/" hx-target="#fmr-form-'.$form_id.'" hx-swap="outerHTML" class="mt-2">'
+        .'<input type="hidden" name="fmr_resend_confirm" value="1">'
+        .'<input type="hidden" name="submission_id" value="'.$submission_id.'">'
+        // Required - app/bootstrap.php's global se_validate_token() gate
+        // runs for every non-empty $_POST, before former's own code ever
+        // sees the request, and redirects to / on a missing/mismatched
+        // token. Same field app/bootstrap.php itself hands out as
+        // $hidden_csrf_token (see form-wrapper.tpl's {hidden_csrf_token}).
+        .$hidden_csrf_token
+        .'<button type="submit" class="btn btn-sm btn-default">Keine E-Mail erhalten? Erneut senden</button>'
+        .'</form>';
+}
+
+/**
+ * Marks a pending submission as confirmed (idempotent - false if it's
+ * already confirmed or doesn't exist) and fires the same notification mail
+ * a non-confirmation submission would have gotten immediately at submit
+ * time. Shared between the visitor-facing confirm-click handler
+ * (global/xhr.php) and the admin's manual "mark as confirmed" action
+ * (backend/writer.php, for edge cases like a verbally-confirmed submission).
+ */
+function fmr_confirm_pending_submission(int $submission_id): bool {
+    global $former_db;
+
+    $submission = $former_db->get('submissions', '*', ['id' => $submission_id]);
+    if (!$submission || $submission['confirmed_at']) {
+        return false;
+    }
+
+    $former_db->update('submissions', ['confirmed_at' => date('Y-m-d H:i:s')], ['id' => $submission_id]);
+
+    $form = $former_db->get('forms', '*', ['id' => $submission['form_id']]);
+    if (!$form) {
+        return true;
+    }
+
+    $fields = $former_db->select('fields', '*', ['form_id' => $form['id'], 'ORDER' => ['sort_order' => 'ASC']]);
+    $clean = json_decode($submission['data'], true) ?: [];
+    $meta = json_decode($submission['meta'] ?? '', true) ?: [];
+
+    $upload_dir = __DIR__.'/../uploads/'.$form['id'].'/';
+    $stored_files = $former_db->select('submission_files', ['field_key', 'original_filename', 'stored_filename'], ['submission_id' => $submission_id]);
+    $uploaded_files = [];
+    foreach ($stored_files as $f) {
+        $uploaded_files[$f['field_key']][] = ['original' => $f['original_filename'], 'stored' => $f['stored_filename']];
+    }
+
+    fmr_send_submission_notification($form, $fields, $clean, $meta, $uploaded_files, $upload_dir);
+
+    return true;
+}
+
+/* -------------------------------------------------------------------
  * Mail with attachments. se_send_mail() (app/functions/functions.php)
  * has no attachment support, so submissions with an uploaded file use
  * this local variant instead - it mirrors se_send_mail()'s SMTP setup
@@ -520,6 +824,103 @@ function fmr_settings_section_toggle(string $collapse_id, string $title): string
         .htmlspecialchars($title).' <i class="bi bi-chevron-down" aria-hidden="true"></i></button>';
 }
 
+/**
+ * One "Einsendungen" card - the per-submission markup rendered both by
+ * backend/reader.php's list (show=submissions) and by backend/writer.php's
+ * confirm_submission action (re-rendering just the one card after a manual
+ * confirm, instead of reloading the whole paginated list - same
+ * hx-target="closest .card" idiom already used for delete_submission).
+ *
+ * @param array      $submission      submissions row
+ * @param bool       $show_form_badge true in the unfiltered "all forms" view
+ * @param array      $field_labels    field_key => label, for THIS submission's form
+ * @param array      $form_names      form_id => name (only needed when $show_form_badge)
+ * @param array      $meta_labels     fmr_meta_labels()
+ * @param array|null $form            the owning forms row (for the confirmation badge/button) - null if the form was since deleted
+ */
+function fmr_render_submission_card(array $submission, bool $show_form_badge, array $field_labels, array $form_names, array $meta_labels, ?array $form): string {
+    global $former_db, $addon_lang;
+
+    $data = json_decode($submission['data'], true) ?: [];
+    $meta = json_decode($submission['meta'] ?? '', true) ?: [];
+    $files = $former_db->select('submission_files', '*', ['submission_id' => $submission['id']]);
+
+    $html = '<div class="card mb-2" id="fmr-submission-'.(int) $submission['id'].'"><div class="card-body">';
+    $html .= '<div class="d-flex justify-content-between align-items-start mb-2">';
+    $html .= '<div class="text-muted small">';
+    if ($show_form_badge) {
+        $form_name = $form_names[(int) $submission['form_id']] ?? ('#'.$submission['form_id']);
+        $html .= '<span class="badge text-bg-secondary me-2">'.htmlspecialchars($form_name).'</span>';
+    }
+    $html .= htmlspecialchars($addon_lang['th_submitted_at'] ?? 'Submitted at').': '.htmlspecialchars($submission['created_at']).' — '.htmlspecialchars($submission['ip_address'] ?? '');
+
+    // Confirmation status only applies (and is only ever set) for a form
+    // that had require_confirmation on - a normal submission has no
+    // confirmed_at/require_confirmation concept to show at all.
+    if ($form && !empty($form['require_confirmation'])) {
+        if (!empty($submission['confirmed_at'])) {
+            $badge = str_replace('{date}', $submission['confirmed_at'], $addon_lang['badge_confirmed'] ?? 'Confirmed on {date}');
+            $html .= ' <span class="badge text-bg-success">'.htmlspecialchars($badge).'</span>';
+        } else {
+            $html .= ' <span class="badge text-bg-warning">'.htmlspecialchars($addon_lang['badge_confirmation_pending'] ?? 'Confirmation pending').'</span>';
+        }
+    }
+    $html .= '</div>'; // text-muted small
+
+    $html .= '<div class="flex-shrink-0">';
+    if ($form && !empty($form['require_confirmation']) && empty($submission['confirmed_at'])) {
+        // Manual override for edge cases the automated link can't cover
+        // (e.g. a verbally-confirmed phone signup) - fires the exact same
+        // notification-mail path a real confirm-click would have
+        // (fmr_confirm_pending_submission()).
+        $html .= '<button type="button" class="btn btn-sm btn-default text-success me-1"
+            hx-post="/admin-xhr/addons/plugin/former/write/"
+            hx-vals=\'{"confirm_submission":"'.(int) $submission['id'].'","csrf_token":"'.$_SESSION['token'].'"}\'
+            hx-target="closest .card" hx-swap="outerHTML swap:0s">'.htmlspecialchars($addon_lang['btn_mark_confirmed'] ?? 'Mark as confirmed').'</button>';
+    }
+    $html .= '<button type="button" class="btn btn-sm btn-default text-danger"
+        hx-post="/admin-xhr/addons/plugin/former/write/"
+        hx-vals=\'{"delete_submission":"'.(int) $submission['id'].'","csrf_token":"'.$_SESSION['token'].'"}\'
+        hx-confirm="'.htmlspecialchars($addon_lang['msg_confirm_delete_submission'] ?? 'Really delete this submission?').'"
+        hx-target="closest .card" hx-swap="outerHTML swap:0s">'.htmlspecialchars($addon_lang['btn_delete'] ?? 'Delete').'</button>';
+    $html .= '</div>';
+    $html .= '</div>'; // d-flex
+
+    $html .= '<table class="table table-sm mb-2">';
+    foreach ($data as $key => $value) {
+        $label = $field_labels[$key] ?? $key;
+        $html .= '<tr><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars(is_array($value) ? implode(', ', $value) : (string) $value).'</td></tr>';
+    }
+    foreach ($meta as $key => $value) {
+        if ($key === 'consent_log') {
+            continue; // rendered as its own section below, not a flat row
+        }
+        $label = $meta_labels[$key] ?? $key;
+        $html .= '<tr class="text-muted"><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars((string) ($value ?? '')).'</td></tr>';
+    }
+    $html .= '</table>';
+
+    if (!empty($meta['consent_log']) && is_array($meta['consent_log'])) {
+        $html .= '<div class="small text-muted mb-2"><strong>'.htmlspecialchars($addon_lang['title_consent_log'] ?? 'Consent proof').':</strong><ul class="mb-0">';
+        foreach ($meta['consent_log'] as $c) {
+            $html .= '<li>'.htmlspecialchars($c['label'] ?? $c['field_key'] ?? '').' — '.htmlspecialchars($c['checked_at'] ?? '').' (IP '.htmlspecialchars($c['ip'] ?? '').')</li>';
+        }
+        $html .= '</ul></div>';
+    }
+
+    if ($files) {
+        $html .= '<div>'.htmlspecialchars($addon_lang['th_files'] ?? 'Files').': ';
+        foreach ($files as $f) {
+            $html .= '<a class="btn btn-sm btn-default me-1" href="/xhr/plugins/former/?download_file='.$f['id'].'">'.htmlspecialchars($f['original_filename']).'</a>';
+        }
+        $html .= '</div>';
+    }
+
+    $html .= '</div></div>';
+
+    return $html;
+}
+
 /* -------------------------------------------------------------------
  * Admin builder - one canvas row per field. Used both for the initial
  * canvas load (backend/reader.php, show=form_canvas) and for the
@@ -635,6 +1036,10 @@ function fmr_render_field_row(array $field): string {
     }
     if (in_array('multiple', $type['config_fields'] ?? [], true)) {
         $html .= '<div class="col-md-3 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_multiple['.$id.']" value="1" '.(!empty($config['multiple']) ? 'checked' : '').' id="fmr-multi-'.$id.'"><label class="form-check-label" for="fmr-multi-'.$id.'">'.htmlspecialchars($addon_lang['label_field_multiple'] ?? 'Allow multiple').'</label></div>';
+    }
+    if (in_array('log_consent', $type['config_fields'] ?? [], true)) {
+        $html .= '<div class="col-md-12 form-check mt-2"><input type="checkbox" class="form-check-input" name="field_log_consent['.$id.']" value="1" '.(!empty($config['log_consent']) ? 'checked' : '').' id="fmr-consent-'.$id.'"><label class="form-check-label" for="fmr-consent-'.$id.'">'.htmlspecialchars($addon_lang['label_field_log_consent'] ?? 'Als Einwilligungs-Nachweis protokollieren').'</label></div>';
+        $html .= '<div class="col-md-12"><div class="form-text">'.htmlspecialchars($addon_lang['hint_field_log_consent'] ?? 'Zeitpunkt und IP-Adresse werden beim Absenden zusätzlich zur Einsendung gespeichert - unabhängig von den globalen „Automatisch mitgesendete Daten"-Einstellungen.').'</div></div>';
     }
     if (in_array('default_value', $type['config_fields'] ?? [], true)) {
         $html .= '<div class="col-md-6"><label class="form-label small">'.htmlspecialchars($addon_lang['label_field_default_value'] ?? 'Default value').'</label><input type="text" class="form-control form-control-sm" name="field_default_value['.$id.']" value="'.htmlspecialchars($config['default_value'] ?? '').'"></div>';
