@@ -90,15 +90,19 @@ sign-up, a survey participant), two independent mechanisms are available - see
   confirmation mail is sent to the address from the form's chosen e-mail field. The
   notification mail to `mail_recipients` and the `former:submitted` event below are **not**
   fired at the original submit for such a form - both are deferred until the visitor clicks
-  through the confirmation link and then clicks "confirm" there (deliberately not
-  auto-confirmed just by opening the link, so an e-mail security scanner pre-fetching it in
-  transit can't count as a confirmation). The link (`fmr_confirm_link()`) points at the actual
-  page the form was embedded on - `https://.../that-page/?fmr_confirm=<token>` - not the bare
-  `/xhr/plugins/former/` endpoint: `plugins/former/index.php` (i.e. the shortcode itself, via
-  `fmr_handle_confirm_request()`) notices `?fmr_confirm=...`/the confirm button's POST and
-  renders the prompt/result there in place of the normal form, so it's a normal page load with
-  the site's own theme (header, footer, any site-wide GTM snippet) - not a bare, unstyled
-  response.
+  through the confirmation link and then clicks "confirm" there. Deliberately NOT
+  auto-confirmed just by opening the link (a GET): corporate mail security gateways commonly
+  pre-fetch links in incoming mail before the recipient ever sees them, which would otherwise
+  let someone enter a third party's address and have it "confirmed" without that person ever
+  clicking anything - undermining double-opt-in's actual legal purpose (proof of a deliberate
+  action by the address's real owner, relevant under German § 7 UWG). A scanner's plain GET
+  fetch never submits the confirm button's POST form, only a real click does. The link
+  (`fmr_confirm_link()`) points at the actual page the form was embedded on -
+  `https://.../that-page/?fmr_confirm=<token>` - not the bare `/xhr/plugins/former/` endpoint:
+  `plugins/former/index.php` (i.e. the shortcode itself, via `fmr_handle_confirm_request()`)
+  notices `?fmr_confirm=...`/the confirm button's POST and renders the prompt/result there in
+  place of the normal form, so it's a normal page load with the site's own theme (header,
+  footer, any site-wide GTM snippet) - not a bare, unstyled response.
 
 ## Frontend event: `former:submitted`
 

@@ -49,8 +49,13 @@ newsletter sign-up), each form's **Settings → E-mail confirmation (double opt-
 3. The confirmation link leads back to the exact page the form is embedded on (wherever the
    `[plugin=former]...[/plugin]` shortcode sits) - not a technical URL. There, a **Confirm**
    button appears in place of the form. Deliberately not auto-confirmed just by opening the
-   link - e-mail security scanners sometimes pre-fetch links in transit, which would
-   otherwise be counted as the recipient's own confirmation.
+   link: e-mail security scanners (e.g. Microsoft Defender for Office 365 Safe Links,
+   Proofpoint, Mimecast - common in corporate mail setups) often pre-fetch links in incoming
+   mail before the recipient ever sees it. If that alone counted as confirmation, someone
+   could enter a third party's address and have their mail server "confirm" it without the
+   actual owner ever clicking anything - defeating double-opt-in's legal purpose (proving a
+   deliberate action by the address's real owner). A scanner fetches the page but never
+   submits a form; only an actual click on the button fires the POST that really confirms.
 4. Only once "Confirm" is actually clicked are the notification mail (to the addresses
    selected under "Recipients") sent and the `former:submitted` JavaScript event fired (see
    the developer page in this help) - not already at the original submit.

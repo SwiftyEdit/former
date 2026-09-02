@@ -53,9 +53,15 @@ Newsletter-Anmeldung), gibt es unter **Einstellungen → Bestätigung per E-Mail
 3. Der Bestätigungslink führt zurück auf genau die Seite, auf der das Formular eingebettet
    ist (dort, wo der Shortcode `[plugin=former]...[/plugin]` steht) - nicht auf eine technische
    Adresse. Dort erscheint statt des Formulars ein **Bestätigen**-Button. Bewusst kein
-   automatisches Bestätigen beim bloßen Öffnen des Links: E-Mail-Sicherheitsscanner rufen
-   Links in Mails teils automatisch vorab auf, was sonst fälschlich als Bestätigung durch den
-   Empfänger gezählt würde.
+   automatisches Bestätigen beim bloßen Öffnen des Links: E-Mail-Sicherheitsscanner
+   (z. B. Microsoft Defender for Office 365 Safe Links, Proofpoint, Mimecast - in
+   Firmenumgebungen weit verbreitet) rufen Links in eingehenden Mails oft automatisch vorab
+   ab, bevor der Empfänger die Mail überhaupt sieht. Würde das schon als Bestätigung zählen,
+   könnte jemand eine fremde Adresse eintragen und der Mailserver des Empfängers würde die
+   Anmeldung „bestätigen", ohne dass der eigentliche Inhaber je etwas angeklickt hat - das
+   würde den rechtlichen Zweck von Double-Opt-In (Nachweis einer bewussten Handlung nach § 7
+   UWG) aushebeln. Ein Sicherheitsscanner ruft die Seite zwar ab, sendet aber kein Formular
+   ab - erst ein echter Klick auf den Button löst den POST aus, der tatsächlich bestätigt.
 4. Erst mit dem Klick auf „Bestätigen" werden die Benachrichtigungs-Mail an die unter
    „Empfänger" ausgewählten Adressen verschickt und das `former:submitted`-JavaScript-Event
    ausgelöst (siehe die Entwickler-Seite in dieser Hilfe) - nicht schon beim ursprünglichen

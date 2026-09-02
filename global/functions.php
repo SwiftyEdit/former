@@ -319,7 +319,15 @@ function fmr_generate_confirm_token(): array {
 function fmr_confirm_link(string $token, string $page_slug): string {
     global $se_base_url;
     $base = rtrim($se_base_url ?? '', '/');
-    $page_slug = $page_slug !== '' ? $page_slug : '/';
+    // $page_slug (fmr_page_slug/$swifty_slug) arrives WITHOUT a leading
+    // slash - app/routing.php's $query comes straight from .htaccess's
+    // `RewriteRule ^(.*)$ index.php?query=$1`, whose captured group is the
+    // path relative to the document root (e.g. "kontakt/", not
+    // "/kontakt/") - so concatenating it onto $base directly (as before)
+    // ran the domain and the slug together with no separator at all.
+    // ltrim() first so a slug that DOES already have one (or several)
+    // doesn't end up double-slashed.
+    $page_slug = '/'.ltrim($page_slug, '/');
     $separator = str_contains($page_slug, '?') ? '&' : '?';
     return $base.$page_slug.$separator.'fmr_confirm='.$token;
 }
@@ -464,10 +472,22 @@ function fmr_render_confirm_page(string $heading, string $message, string $actio
  * the real page the form was embedded on) and the actual POST confirm click
  * (from that landing state's own button, submitted back to that SAME page -
  * see the action="" form below) both live here, called from
- * plugins/former/index.php. Returns null when neither $_GET['fmr_confirm']
- * nor $_POST['fmr_do_confirm'] is present, so the caller can tell "not a
- * confirm request at all" apart from "handled - here's the fragment to show
- * instead of the normal form".
+ * plugins/former/index.php.
+ *
+ * Deliberately NOT auto-confirmed just by opening the link (a GET) - an
+ * e-mail security gateway/scanner (Microsoft Defender for Office 365 Safe
+ * Links, Proofpoint, Mimecast, ... - common in corporate mail setups)
+ * commonly pre-fetches links in incoming mail before the recipient ever
+ * sees it. If that alone counted as confirmation, someone could enter a
+ * third party's address and have it "confirmed" without that person ever
+ * clicking anything - which defeats double-opt-in's actual legal purpose
+ * under German law (§ 7 UWG): proving the address's real owner
+ * deliberately consented. A scanner's plain GET fetch never submits this
+ * POST form, only an actual click does.
+ *
+ * Returns null when neither $_GET['fmr_confirm'] nor $_POST['fmr_do_confirm']
+ * is present, so the caller can tell "not a confirm request at all" apart
+ * from "handled - here's the fragment to show instead of the normal form".
  */
 function fmr_handle_confirm_request(): ?string {
     global $former_db, $hidden_csrf_token;
@@ -484,7 +504,7 @@ function fmr_handle_confirm_request(): ?string {
     // included) - $post_token, not $get_token, is what decides prompt vs.
     // actually-confirm below, so that's fine either way.
     $token = $post_token ?? $get_token;
-    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
+    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at', 'form_id'], ['confirm_token_hash' => hash('sha256', $token)]);
 
     if (!$submission) {
         return fmr_render_confirm_page('Ungültiger Link', 'Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.');
@@ -497,9 +517,7 @@ function fmr_handle_confirm_request(): ?string {
     }
 
     if ($post_token === null) {
-        // GET: show the prompt, deliberately not auto-confirmed just by
-        // opening the link - an e-mail security scanner pre-fetching links
-        // in transit would otherwise count as the recipient's own click.
+        // GET: show the prompt only, don't confirm yet.
         $action = '<form method="post" action="">'
             .'<input type="hidden" name="fmr_do_confirm" value="1">'
             .'<input type="hidden" name="fmr_confirm_token" value="'.htmlspecialchars($token).'">'
@@ -515,11 +533,11 @@ function fmr_handle_confirm_request(): ?string {
     // submit.
     fmr_confirm_pending_submission((int) $submission['id']);
 
-    $submission_full = $former_db->get('submissions', ['form_id', 'data', 'meta'], ['id' => $submission['id']]);
-    $form = $former_db->get('forms', '*', ['id' => $submission_full['form_id']]);
+    $submission_full = $former_db->get('submissions', ['data', 'meta'], ['id' => $submission['id']]);
+    $form = $former_db->get('forms', '*', ['id' => $submission['form_id']]);
 
     $tracking_json = json_encode([
-        'form_id' => (int) $submission_full['form_id'],
+        'form_id' => (int) $submission['form_id'],
         'form_name' => $form['name'] ?? '',
         'submission_id' => (int) $submission['id'],
         'data' => json_decode($submission_full['data'] ?? '', true) ?: [],
