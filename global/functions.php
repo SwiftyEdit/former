@@ -296,8 +296,19 @@ function fmr_generate_confirm_token(): array {
  * a bare xhr response has none of that. Has to be an absolute URL (unlike
  * the relative /xhr/... URLs used elsewhere in this plugin, e.g. the
  * file-download link in backend/reader.php) since it's opened from an
- * e-mail client, not a page already on this site - same $se_settings domain
- * lookup as the account-unlock mail in app/functions/functions.user.php.
+ * e-mail client, not a page already on this site.
+ *
+ * Uses $se_base_url - the ready-made, already-correct "domain + cms_base"
+ * string app/bootstrap.php computes once per request (cms_ssl_domain
+ * falling back to cms_domain, e.g. "https://swiftyedit-addons.test", plus
+ * cms_base for a subdirectory install) - NOT $se_settings['cms_ssl_domain']
+ * rebuilt by hand here, and NOT the 'prefs_'-prefixed keys
+ * ($se_settings['prefs_cms_ssl_domain']) that app/functions/functions.
+ * user.php's account-unlock mail incorrectly reads: $se_settings only ever
+ * holds the *stripped* keys (app/bootstrap.php strips the 'prefs_' prefix
+ * when building it from the raw settings rows), so a 'prefs_'-prefixed
+ * lookup against it is always empty/undefined - a latent bug in that other
+ * call site, not a pattern to copy.
  *
  * $page_slug is the value already captured into every submission's
  * fmr_page_slug hidden field (submissions.confirm_page_slug - see
@@ -306,8 +317,8 @@ function fmr_generate_confirm_token(): array {
  * shortcode is used on.
  */
 function fmr_confirm_link(string $token, string $page_slug): string {
-    global $se_settings;
-    $base = rtrim($se_settings['prefs_cms_ssl_domain'] ?? ($se_settings['prefs_cms_domain'] ?? ''), '/');
+    global $se_base_url;
+    $base = rtrim($se_base_url ?? '', '/');
     $page_slug = $page_slug !== '' ? $page_slug : '/';
     $separator = str_contains($page_slug, '?') ? '&' : '?';
     return $base.$page_slug.$separator.'fmr_confirm='.$token;
