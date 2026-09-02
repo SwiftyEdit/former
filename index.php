@@ -9,12 +9,25 @@ if (SE_SECTION !== 'backend') {
     // for the page content). require_once only executes bootstrap.php's body
     // - and with it the `global $former_db;` binding - on the first of those
     // calls, so later calls need their own `global` here to see it.
-    global $former_db;
+    global $former_db, $hidden_csrf_token;
     require_once __DIR__.'/global/bootstrap.php';
 
     $fmr_form_id = (int) ($form_id ?? 0);
 
-    if ($fmr_form_id > 0 && isset($former_db)) {
-        echo fmr_render_form($fmr_form_id);
+    if (isset($former_db)) {
+        // Double-opt-in confirm request (the link/button in the
+        // confirmation mail - see fmr_confirm_link()) takes over this
+        // shortcode's spot on the page instead of the normal form, so it
+        // renders inside the real page/theme (header, footer, any
+        // site-wide tag-manager snippet) rather than a bare
+        // /xhr/plugins/former/ response, which has none of that. null
+        // means this request wasn't a confirm request at all.
+        $fmr_confirm_html = fmr_handle_confirm_request();
+
+        if ($fmr_confirm_html !== null) {
+            echo $fmr_confirm_html;
+        } elseif ($fmr_form_id > 0) {
+            echo fmr_render_form($fmr_form_id);
+        }
     }
 }

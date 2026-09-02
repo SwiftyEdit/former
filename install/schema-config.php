@@ -74,6 +74,15 @@ return [
         'confirm_expires_at' => 'DATETIME NULL',
         'confirm_sent_at' => 'DATETIME NULL',
         'confirmed_at' => 'DATETIME NULL',
+        // The page slug the form was embedded on at submit time (same value
+        // already captured into fmr_page_slug/meta.page_url - see
+        // fmr_build_submission_meta()), kept independently of that opt-in
+        // checkbox so the confirmation link always has somewhere real to
+        // point to: the confirm/resend link is built as that page's own URL
+        // + ?fmr_confirm=<token>, handled by plugins/former/index.php within
+        // the actual page/theme - NOT a bare /xhr/plugins/former/ response,
+        // which has no site header/footer/tag-manager snippet of its own.
+        'confirm_page_slug' => 'VARCHAR(255) NULL',
         'created_at' => 'DATETIME DEFAULT CURRENT_TIMESTAMP',
     ],
 

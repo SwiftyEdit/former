@@ -50,20 +50,20 @@ Newsletter-Anmeldung), gibt es unter **Einstellungen → Bestätigung per E-Mail
    „Bestätigung ausstehend").
 2. Statt der normalen Erfolgsmeldung sieht der Besucher einen Hinweis, seine E-Mails zu
    prüfen - inklusive eines „Erneut senden"-Buttons, falls die Mail nicht ankommt.
-3. Der Bestätigungslink öffnet eine eigene Seite mit einem **Bestätigen**-Button. Bewusst
-   kein automatisches Bestätigen beim bloßen Öffnen des Links: E-Mail-Sicherheitsscanner
-   rufen Links in Mails teils automatisch vorab auf, was sonst fälschlich als Bestätigung
-   durch den Empfänger gezählt würde.
+3. Der Bestätigungslink führt zurück auf genau die Seite, auf der das Formular eingebettet
+   ist (dort, wo der Shortcode `[plugin=former]...[/plugin]` steht) - nicht auf eine technische
+   Adresse. Dort erscheint statt des Formulars ein **Bestätigen**-Button. Bewusst kein
+   automatisches Bestätigen beim bloßen Öffnen des Links: E-Mail-Sicherheitsscanner rufen
+   Links in Mails teils automatisch vorab auf, was sonst fälschlich als Bestätigung durch den
+   Empfänger gezählt würde.
 4. Erst mit dem Klick auf „Bestätigen" werden die Benachrichtigungs-Mail an die unter
    „Empfänger" ausgewählten Adressen verschickt und das `former:submitted`-JavaScript-Event
    ausgelöst (siehe die Entwickler-Seite in dieser Hilfe) - nicht schon beim ursprünglichen
    Absenden.
 
-**Hinweis zu Tracking-Snippets:** Die Bestätigungsseite ist eine eigenständige, schlichte
-Seite ohne das übrige Seiten-Theme - ein z. B. im Theme eingebundenes Google-Tag-Manager-
-Snippet lädt dort nicht mit. Wird eine Conversion erst mit der tatsächlichen Bestätigung
-gezählt, muss das entsprechend über einen anderen Weg gelöst werden (z. B. anhand der
-Benachrichtigungs-Mail).
+Da der Bestätigungs-Schritt innerhalb der normalen Seite (samt Theme, Header/Footer und
+einem eventuell eingebundenen Google-Tag-Manager-Snippet) läuft, funktionieren dort
+eingebundene Tracking-Snippets ganz normal mit.
 
 ### Manuell bestätigen
 

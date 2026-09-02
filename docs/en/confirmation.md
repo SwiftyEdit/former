@@ -46,17 +46,17 @@ newsletter sign-up), each form's **Settings → E-mail confirmation (double opt-
    "Submissions" area immediately, tagged "Confirmation pending".
 2. Instead of the usual success message, the visitor sees a note to check their e-mail,
    including a "resend" button in case the mail doesn't arrive.
-3. The confirmation link opens its own page with a **Confirm** button. Deliberately not
-   auto-confirmed just by opening the link - e-mail security scanners sometimes pre-fetch
-   links in transit, which would otherwise be counted as the recipient's own confirmation.
+3. The confirmation link leads back to the exact page the form is embedded on (wherever the
+   `[plugin=former]...[/plugin]` shortcode sits) - not a technical URL. There, a **Confirm**
+   button appears in place of the form. Deliberately not auto-confirmed just by opening the
+   link - e-mail security scanners sometimes pre-fetch links in transit, which would
+   otherwise be counted as the recipient's own confirmation.
 4. Only once "Confirm" is actually clicked are the notification mail (to the addresses
    selected under "Recipients") sent and the `former:submitted` JavaScript event fired (see
    the developer page in this help) - not already at the original submit.
 
-**Note on tracking snippets:** the confirmation page is a standalone, plain page outside the
-site's normal theme - a Google Tag Manager snippet embedded in the theme, for instance,
-won't load there. If a conversion should only count on actual confirmation, that needs to be
-solved some other way (e.g. off the notification mail).
+Since the confirm step runs inside the normal page (theme, header/footer, and any Google Tag
+Manager snippet embedded there included), tracking snippets on that page work normally.
 
 ### Confirming manually
 

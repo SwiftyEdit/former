@@ -90,13 +90,15 @@ sign-up, a survey participant), two independent mechanisms are available - see
   confirmation mail is sent to the address from the form's chosen e-mail field. The
   notification mail to `mail_recipients` and the `former:submitted` event below are **not**
   fired at the original submit for such a form - both are deferred until the visitor clicks
-  through the confirmation link and then clicks "confirm" on its landing page (deliberately
-  not auto-confirmed on GET, so an e-mail security scanner pre-fetching the link can't count
-  as a confirmation). That landing page (`templates/confirm-page.tpl`) is a standalone HTML
-  document outside the site's normal theme, so a site-wide GTM snippet embedded in the theme
-  will *not* be present there - if a conversion should only fire on actual confirmation,
-  trigger it some other way (e.g. off the notification mail) rather than assuming `gtag`/
-  `dataLayer` are available on that page.
+  through the confirmation link and then clicks "confirm" there (deliberately not
+  auto-confirmed just by opening the link, so an e-mail security scanner pre-fetching it in
+  transit can't count as a confirmation). The link (`fmr_confirm_link()`) points at the actual
+  page the form was embedded on - `https://.../that-page/?fmr_confirm=<token>` - not the bare
+  `/xhr/plugins/former/` endpoint: `plugins/former/index.php` (i.e. the shortcode itself, via
+  `fmr_handle_confirm_request()`) notices `?fmr_confirm=...`/the confirm button's POST and
+  renders the prompt/result there in place of the normal form, so it's a normal page load with
+  the site's own theme (header, footer, any site-wide GTM snippet) - not a bare, unstyled
+  response.
 
 ## Frontend event: `former:submitted`
 

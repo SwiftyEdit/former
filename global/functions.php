@@ -287,16 +287,30 @@ function fmr_generate_confirm_token(): array {
 }
 
 /**
- * Absolute confirmation link for a token. Has to be absolute (unlike the
- * relative /xhr/plugins/former/... URLs used elsewhere in this plugin, e.g.
- * the file-download link in backend/reader.php) since it's opened from an
- * e-mail client, not a page on this site - same $se_settings domain lookup
- * as the account-unlock mail in app/functions/functions.user.php.
+ * Absolute confirmation link for a token, pointing at the real page the
+ * form was embedded on (?fmr_confirm=<token> appended there) - NOT the bare
+ * /xhr/plugins/former/ endpoint. plugins/former/index.php is what actually
+ * runs on that page (via the [plugin=former] shortcode's own buffer_script()
+ * inclusion) and handles the confirm/click there, so the visitor gets the
+ * real site theme (header, footer, any site-wide tag-manager snippet) -
+ * a bare xhr response has none of that. Has to be an absolute URL (unlike
+ * the relative /xhr/... URLs used elsewhere in this plugin, e.g. the
+ * file-download link in backend/reader.php) since it's opened from an
+ * e-mail client, not a page already on this site - same $se_settings domain
+ * lookup as the account-unlock mail in app/functions/functions.user.php.
+ *
+ * $page_slug is the value already captured into every submission's
+ * fmr_page_slug hidden field (submissions.confirm_page_slug - see
+ * global/xhr.php) - the page the form was actually embedded on when this
+ * particular visitor submitted it, not necessarily the only page the
+ * shortcode is used on.
  */
-function fmr_confirm_link(string $token): string {
+function fmr_confirm_link(string $token, string $page_slug): string {
     global $se_settings;
     $base = rtrim($se_settings['prefs_cms_ssl_domain'] ?? ($se_settings['prefs_cms_domain'] ?? ''), '/');
-    return $base.'/xhr/plugins/former/?fmr_confirm='.$token;
+    $page_slug = $page_slug !== '' ? $page_slug : '/';
+    $separator = str_contains($page_slug, '?') ? '&' : '?';
+    return $base.$page_slug.$separator.'fmr_confirm='.$token;
 }
 
 /**
@@ -304,8 +318,8 @@ function fmr_confirm_link(string $token): string {
  * Caller is responsible for having just written a fresh confirm_token_hash/
  * confirm_expires_at matching $token.
  */
-function fmr_send_confirmation_mail(array $form, string $email, string $token): void {
-    $link = fmr_confirm_link($token);
+function fmr_send_confirmation_mail(array $form, string $email, string $token, string $page_slug): void {
+    $link = fmr_confirm_link($token, $page_slug);
 
     $subject = $form['confirm_mail_subject'] ?: ('Bitte bestätigen Sie Ihre Anmeldung: '.$form['name']);
     $body = $form['confirm_mail_body'] ?: ('Bitte bestätigen Sie Ihre Angaben über den folgenden Link:<br><br><a href="{confirm_link}">{confirm_link}</a><br><br>'
@@ -413,25 +427,97 @@ function fmr_send_submission_notification(array $form, array $fields, array $cle
 }
 
 /**
- * Renders the standalone confirm-link landing page (templates/confirm-
- * page.tpl, or a template-set override) for one of its fixed states -
- * prompt / already-confirmed / expired / invalid / success. Unlike the
- * rest of this plugin's templates, this one is a full HTML document: it's
- * opened as a fresh top-level navigation from an e-mail client, not
- * htmx-swapped into an existing page, so there's no surrounding site theme
- * here to inherit CSS - or a tag-manager snippet - from. If a form's
- * "confirmed" tracking event needs to reach something like GTM, that has
- * to be wired up independently of this page (e.g. off the notification
- * mail instead), not assumed to just work here.
+ * Renders the confirm-link content fragment (templates/confirm-page.tpl, or
+ * a template-set override) for one of its fixed states - prompt /
+ * already-confirmed / expired / invalid / success. Reached via
+ * plugins/former/index.php (fmr_handle_confirm_request() below), i.e.
+ * embedded in the real page the form's shortcode sits on, INSIDE that
+ * page's own theme (header, footer, any site-wide tag-manager snippet) -
+ * unlike most of this plugin's other dynamic output, this one deliberately
+ * does NOT go through the bare /xhr/plugins/former/ endpoint, precisely so
+ * a "confirmed" tracking hook has the same theme/GTM context a normal
+ * successful submission would.
  */
 function fmr_render_confirm_page(string $heading, string $message, string $action_html = '', string $tracking_script = '', ?string $set = null): string {
     $tpl = file_get_contents(fmr_resolve_template('confirm-page.tpl', $set));
-    $tpl = str_replace('{title}', htmlspecialchars($heading), $tpl);
     $tpl = str_replace('{heading}', htmlspecialchars($heading), $tpl);
     $tpl = str_replace('{message}', htmlspecialchars($message), $tpl);
     $tpl = str_replace('{action_html}', $action_html, $tpl);
     $tpl = str_replace('{tracking_script}', $tracking_script, $tpl);
     return $tpl;
+}
+
+/**
+ * Handles a double-opt-in confirm request: the GET landing state (from the
+ * link in the confirmation mail, built by fmr_confirm_link() to point at
+ * the real page the form was embedded on) and the actual POST confirm click
+ * (from that landing state's own button, submitted back to that SAME page -
+ * see the action="" form below) both live here, called from
+ * plugins/former/index.php. Returns null when neither $_GET['fmr_confirm']
+ * nor $_POST['fmr_do_confirm'] is present, so the caller can tell "not a
+ * confirm request at all" apart from "handled - here's the fragment to show
+ * instead of the normal form".
+ */
+function fmr_handle_confirm_request(): ?string {
+    global $former_db, $hidden_csrf_token;
+
+    $get_token = isset($_GET['fmr_confirm']) ? (string) $_GET['fmr_confirm'] : null;
+    $post_token = isset($_POST['fmr_do_confirm']) ? (string) ($_POST['fmr_confirm_token'] ?? '') : null;
+
+    if ($get_token === null && $post_token === null) {
+        return null;
+    }
+
+    // A POST here also still carries its own ?fmr_confirm=... in the URL
+    // (action="" resubmits to the exact current URL, query string
+    // included) - $post_token, not $get_token, is what decides prompt vs.
+    // actually-confirm below, so that's fine either way.
+    $token = $post_token ?? $get_token;
+    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
+
+    if (!$submission) {
+        return fmr_render_confirm_page('Ungültiger Link', 'Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.');
+    }
+    if (!empty($submission['confirmed_at'])) {
+        return fmr_render_confirm_page('Bereits bestätigt', 'Diese Anmeldung wurde bereits bestätigt - es ist nichts weiter zu tun.');
+    }
+    if (!empty($submission['confirm_expires_at']) && strtotime($submission['confirm_expires_at']) < time()) {
+        return fmr_render_confirm_page('Link abgelaufen', 'Dieser Bestätigungslink ist leider abgelaufen. Bitte senden Sie das Formular erneut ab.');
+    }
+
+    if ($post_token === null) {
+        // GET: show the prompt, deliberately not auto-confirmed just by
+        // opening the link - an e-mail security scanner pre-fetching links
+        // in transit would otherwise count as the recipient's own click.
+        $action = '<form method="post" action="">'
+            .'<input type="hidden" name="fmr_do_confirm" value="1">'
+            .'<input type="hidden" name="fmr_confirm_token" value="'.htmlspecialchars($token).'">'
+            .$hidden_csrf_token
+            .'<button type="submit" class="btn btn-primary">Jetzt bestätigen</button>'
+            .'</form>';
+        return fmr_render_confirm_page('Bitte bestätigen', 'Bitte bestätigen Sie mit einem Klick auf den Button, dass Sie diese Anmeldung selbst vorgenommen haben.', $action);
+    }
+
+    // POST: the actual confirm - notification mail to mail_recipients and
+    // the former:submitted tracking event both fire here for the first
+    // time (fmr_confirm_pending_submission()), not back at the original
+    // submit.
+    fmr_confirm_pending_submission((int) $submission['id']);
+
+    $submission_full = $former_db->get('submissions', ['form_id', 'data', 'meta'], ['id' => $submission['id']]);
+    $form = $former_db->get('forms', '*', ['id' => $submission_full['form_id']]);
+
+    $tracking_json = json_encode([
+        'form_id' => (int) $submission_full['form_id'],
+        'form_name' => $form['name'] ?? '',
+        'submission_id' => (int) $submission['id'],
+        'data' => json_decode($submission_full['data'] ?? '', true) ?: [],
+        'meta' => json_decode($submission_full['meta'] ?? '', true) ?: [],
+    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+    $tracking_script = '<script>document.dispatchEvent(new CustomEvent(\'former:submitted\', { bubbles: true, detail: '.$tracking_json.' }));</script>';
+
+    $message = $form['confirmed_message'] ?: 'Vielen Dank, Ihre Anmeldung wurde erfolgreich bestätigt.';
+    return fmr_render_confirm_page('Bestätigt', $message, '', $tracking_script, $form['template_set'] ?? null);
 }
 
 /**

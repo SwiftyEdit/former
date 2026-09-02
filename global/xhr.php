@@ -49,96 +49,14 @@ if (isset($_GET['download_file'])) {
 }
 
 /* -------------------------------------------------------------------
- * Double-opt-in: confirmation landing page (GET, from the mail link),
- * the actual confirm click (POST, from that landing page's own button -
- * deliberately not auto-confirmed on the GET itself, since e-mail security
- * scanners that pre-fetch links in transit would otherwise "confirm" a
- * signup nobody ever consciously clicked), and "resend the confirmation
- * mail" (POST, from the pending-confirmation card htmx-swapped into the
- * original page right after submitting). None of these are part of the
+ * Double-opt-in: "resend the confirmation mail" (POST, from the
+ * pending-confirmation card htmx-swapped into the original page right
+ * after submitting). The confirmation landing page/click itself is handled
+ * by plugins/former/index.php instead (fmr_handle_confirm_request()) -
+ * NOT here - so it renders inside the real page/theme the form is embedded
+ * on rather than a bare response from this endpoint. Not part of the
  * normal frontend submission flow further below.
  * ---------------------------------------------------------------- */
-
-/**
- * Renders the right rejection state (invalid / already-confirmed / expired)
- * for a token lookup, or null if the submission is real and still pending -
- * shared between the GET landing page and the POST confirm click below,
- * which both need to reject the same three ways before doing anything else.
- */
-$fmr_render_token_rejection = function (?array $submission): ?string {
-    if (!$submission) {
-        return fmr_render_confirm_page('Ungültiger Link', 'Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.');
-    }
-    if (!empty($submission['confirmed_at'])) {
-        return fmr_render_confirm_page('Bereits bestätigt', 'Diese Anmeldung wurde bereits bestätigt - es ist nichts weiter zu tun.');
-    }
-    if (!empty($submission['confirm_expires_at']) && strtotime($submission['confirm_expires_at']) < time()) {
-        return fmr_render_confirm_page('Link abgelaufen', 'Dieser Bestätigungslink ist leider abgelaufen. Bitte senden Sie das Formular erneut ab.');
-    }
-    return null;
-};
-
-if (isset($_GET['fmr_confirm'])) {
-    $token = (string) $_GET['fmr_confirm'];
-    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
-
-    $rejection = $fmr_render_token_rejection($submission);
-    if ($rejection !== null) {
-        echo $rejection;
-    } else {
-        // csrf_token is required here too - app/bootstrap.php's global
-        // se_validate_token() gate runs for every non-empty $_POST before
-        // former's own code ever sees the request, and would otherwise
-        // redirect this plain (non-htmx) form straight to / on submit.
-        // $hidden_csrf_token was generated for *this* GET request's own
-        // session (app/bootstrap.php always ensures $_SESSION['token']
-        // exists) - the click below happens in the same browser/session, so
-        // it still matches at POST time regardless of which device the
-        // visitor originally filled the form in on.
-        $action = '<form method="post" action="/xhr/plugins/former/">'
-            .'<input type="hidden" name="fmr_do_confirm" value="1">'
-            .'<input type="hidden" name="fmr_confirm_token" value="'.htmlspecialchars($token).'">'
-            .$hidden_csrf_token
-            .'<button type="submit">Jetzt bestätigen</button>'
-            .'</form>';
-        echo fmr_render_confirm_page('Bitte bestätigen', 'Bitte bestätigen Sie mit einem Klick auf den Button, dass Sie diese Anmeldung selbst vorgenommen haben.', $action);
-    }
-    exit;
-}
-
-if (isset($_POST['fmr_do_confirm'])) {
-    $token = (string) ($_POST['fmr_confirm_token'] ?? '');
-    $submission = $former_db->get('submissions', ['id', 'confirmed_at', 'confirm_expires_at'], ['confirm_token_hash' => hash('sha256', $token)]);
-
-    $rejection = $fmr_render_token_rejection($submission);
-    if ($rejection !== null) {
-        echo $rejection;
-        exit;
-    }
-
-    fmr_confirm_pending_submission((int) $submission['id']);
-
-    $submission_full = $former_db->get('submissions', ['form_id', 'data', 'meta'], ['id' => $submission['id']]);
-    $form = $former_db->get('forms', '*', ['id' => $submission_full['form_id']]);
-
-    // Fired here - not at the original submit - since this is the point a
-    // visitor has actually proven the submission was them. Note this page
-    // has no site theme/tag-manager snippet of its own (see
-    // fmr_render_confirm_page()'s docblock); a listener on document that's
-    // present here regardless will still catch it, GTM's own snippet won't.
-    $tracking_json = json_encode([
-        'form_id' => (int) $submission_full['form_id'],
-        'form_name' => $form['name'] ?? '',
-        'submission_id' => (int) $submission['id'],
-        'data' => json_decode($submission_full['data'] ?? '', true) ?: [],
-        'meta' => json_decode($submission_full['meta'] ?? '', true) ?: [],
-    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
-    $tracking_script = '<script>document.dispatchEvent(new CustomEvent(\'former:submitted\', { bubbles: true, detail: '.$tracking_json.' }));</script>';
-
-    $message = $form['confirmed_message'] ?: 'Vielen Dank, Ihre Anmeldung wurde erfolgreich bestätigt.';
-    echo fmr_render_confirm_page('Bestätigt', $message, '', $tracking_script, $form['template_set'] ?? null);
-    exit;
-}
 
 if (isset($_POST['fmr_resend_confirm'])) {
     $submission_id = (int) ($_POST['submission_id'] ?? 0);
@@ -176,7 +94,7 @@ if (isset($_POST['fmr_resend_confirm'])) {
                 'confirm_expires_at' => date('Y-m-d H:i:s', time() + ((int) ($form['confirm_expires_hours'] ?: 48)) * 3600),
                 'confirm_sent_at' => date('Y-m-d H:i:s'),
             ], ['id' => $submission_id]);
-            fmr_send_confirmation_mail($form, $email, $token);
+            fmr_send_confirmation_mail($form, $email, $token, $submission['confirm_page_slug'] ?? '');
         }
     }
 
@@ -408,6 +326,13 @@ if ((int) $form['store_to_db'] === 1 || $requires_confirmation) {
         $insert['confirm_token_hash'] = $hash;
         $insert['confirm_expires_at'] = date('Y-m-d H:i:s', time() + ((int) ($form['confirm_expires_hours'] ?: 48)) * 3600);
         $insert['confirm_sent_at'] = date('Y-m-d H:i:s');
+        // The page this visitor actually submitted from - fmr_confirm_link()
+        // builds the mail's link against this exact page, not a hardcoded
+        // one, since the same form can be embedded on more than one page.
+        // Always present regardless of the "Seiten-Informationen" checkbox
+        // (form-wrapper.tpl always sends this hidden field - see
+        // fmr_render_form()), unlike meta.page_url, which is opt-in.
+        $insert['confirm_page_slug'] = (string) ($_POST['fmr_page_slug'] ?? '');
     }
 
     $former_db->insert('submissions', $insert);
@@ -434,7 +359,7 @@ if ($requires_confirmation) {
     // former:submitted tracking event - both are deferred to the
     // confirm-click handler above (fmr_confirm_pending_submission()), fired
     // only once the visitor has actually proven the submission was them.
-    fmr_send_confirmation_mail($form, $confirm_email, $confirm_token);
+    fmr_send_confirmation_mail($form, $confirm_email, $confirm_token, (string) ($_POST['fmr_page_slug'] ?? ''));
 
     // Session-scoped whitelist for the "resend" button - see
     // fmr_resend_confirm above for why this matters.
