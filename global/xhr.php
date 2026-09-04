@@ -396,7 +396,14 @@ $tracking_json = json_encode([
 
 $success_tpl = file_get_contents(fmr_resolve_template('success.tpl', $form['template_set'] ?? null));
 $success_tpl = str_replace('{form_id}', (string) $form_id, $success_tpl);
-$success_tpl = str_replace('{message}', htmlspecialchars($form['success_message'] ?: 'Vielen Dank für Ihre Nachricht!'), $success_tpl);
+// Not htmlspecialchars() - success_message is admin-authored HTML
+// (writer.php whitelist-strips it on save, see fmr_allowed_content_tags()),
+// same trust level as confirmed_message in fmr_render_confirm_page(). Same
+// fmr_smart_nl2br() treatment as confirm_mail_body/text_block too, so plain
+// multi-line text still gets real line breaks without doubling them on
+// pasted block HTML.
+$success_message = fmr_smart_nl2br($form['success_message'] ?: 'Vielen Dank für Ihre Nachricht!');
+$success_tpl = str_replace('{message}', $success_message, $success_tpl);
 $success_tpl = str_replace('{tracking_event_json}', $tracking_json, $success_tpl);
 echo $success_tpl;
 

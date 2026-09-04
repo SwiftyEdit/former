@@ -3,14 +3,20 @@
     "id": "former",
     "name": "Former",
     "type": "plugin",
-    "version": "1.2.1",
-    "build": 16,
+    "version": "1.2.2",
+    "build": 17,
     "author": "SwiftyEdit Developer Team",
     "description": "Build unlimited forms via drag & drop, with database storage, email delivery, file upload, captcha protection and e-mail double-opt-in confirmation.",
     "database": "former.sqlite3",
     "update_url": "https://raw.githubusercontent.com/SwiftyEdit/former/main/info.json"
   },
   "versions": [
+    {
+      "version": "1.2.2",
+      "build": 17,
+      "requires_build": "26-0183",
+      "download_url": "https://github.com/SwiftyEdit/former/releases/download/v1.2.2/former-1.2.2.zip"
+    },
     {
       "version": "1.2.1",
       "build": 16,

@@ -545,7 +545,11 @@ function fmr_handle_confirm_request(): ?string {
     ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
     $tracking_script = '<script>document.dispatchEvent(new CustomEvent(\'former:submitted\', { bubbles: true, detail: '.$tracking_json.' }));</script>';
 
-    $message = $form['confirmed_message'] ?: 'Vielen Dank, Ihre Anmeldung wurde erfolgreich bestätigt.';
+    // Same fmr_smart_nl2br() treatment as confirm_mail_body/text_block
+    // (fmr_allowed_content_tags() trust level, see writer.php) - plain
+    // multi-line text still gets real line breaks, pasted block HTML
+    // doesn't get doubled ones.
+    $message = fmr_smart_nl2br($form['confirmed_message'] ?: 'Vielen Dank, Ihre Anmeldung wurde erfolgreich bestätigt.');
     return fmr_render_confirm_page('Bestätigt', $message, '', $tracking_script, $form['template_set'] ?? null);
 }
 

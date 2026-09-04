@@ -84,18 +84,20 @@ if (isset($_POST['save_form_settings'])) {
         'send_mail' => isset($_POST['send_mail']) ? 1 : 0,
         'mail_subject' => sanitizeUserInputs($_POST['mail_subject'] ?? ''),
         'mail_recipients' => json_encode($recipients),
-        'success_message' => sanitizeUserInputs($_POST['success_message'] ?? ''),
-        'error_message' => sanitizeUserInputs($_POST['error_message'] ?? ''),
+        // Whitelist-strip, not sanitizeUserInputs() - same reasoning as a
+        // text_block's 'content' below: this is admin-authored HTML meant
+        // to render for the visitor (basic formatting like <strong>/<a>),
+        // not visitor input, so it shouldn't be strip_tags()'d down to
+        // plain text.
+        'success_message' => trim(strip_tags($_POST['success_message'] ?? '', fmr_allowed_content_tags())),
+        'error_message' => trim(strip_tags($_POST['error_message'] ?? '', fmr_allowed_content_tags())),
         'submit_button_label' => sanitizeUserInputs($_POST['submit_button_label'] ?? ''),
         'template_set' => $template_set,
         'require_confirmation' => $require_confirmation,
         'confirm_email_field' => $confirm_email_field,
         'confirm_mail_subject' => sanitizeUserInputs($_POST['confirm_mail_subject'] ?? ''),
-        // Whitelist-strip, not sanitizeUserInputs() - same reasoning as a
-        // text_block's 'content' above: this is admin-authored HTML meant
-        // to render (it needs at least an <a>), not visitor input.
         'confirm_mail_body' => trim(strip_tags($_POST['confirm_mail_body'] ?? '', fmr_allowed_content_tags())),
-        'confirmed_message' => sanitizeUserInputs($_POST['confirmed_message'] ?? ''),
+        'confirmed_message' => trim(strip_tags($_POST['confirmed_message'] ?? '', fmr_allowed_content_tags())),
         'confirm_expires_hours' => max(1, (int) ($_POST['confirm_expires_hours'] ?? 48)),
         'updated_at' => date('Y-m-d H:i:s'),
     ], ['id' => $form_id]);
