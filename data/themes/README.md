@@ -79,7 +79,7 @@ Beispiele hier ist Teil der Installation).
 {fields_html}
 </div>
 {captcha_html}
-<div style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true">
+<div style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;" aria-hidden="true">
 <input type="text" name="fmr_hp" value="" tabindex="-1" autocomplete="off">
 </div>
 <input type="hidden" name="sendtime" value="{sendtime}">
