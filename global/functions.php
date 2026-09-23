@@ -393,7 +393,7 @@ function fmr_send_submission_notification(array $form, array $fields, array $cle
             continue;
         }
         $v = $clean[$field['field_key']] ?? '';
-        $body .= '<tr><td>'.htmlspecialchars($field['label']).'</td><td>'.htmlspecialchars(is_array($v) ? implode(', ', $v) : (string) $v).'</td></tr>';
+        $body .= '<tr><td>'.htmlspecialchars($field['label']).'</td><td>'.fmr_format_value_html($v).'</td></tr>';
     }
     $meta_labels = fmr_meta_labels();
     foreach ($meta as $key => $value) {
@@ -699,6 +699,19 @@ function fmr_sanitize_value($raw) {
         return array_map('fmr_sanitize_value', $raw);
     }
     return sanitizeUserInputs((string) $raw);
+}
+
+/**
+ * HTML display of one stored submission value (backend card + notification
+ * mail). Values are already htmlspecialchars()'d once at submit time by
+ * sanitizeUserInputs(), so double_encode=false keeps e.g. an apostrophe from
+ * showing up as a literal "&#039;" - while still escaping anything that
+ * wasn't encoded yet. nl2br() so textarea line breaks (stored as real "\n")
+ * are actually visible instead of collapsing into one line.
+ */
+function fmr_format_value_html($value): string {
+    $str = is_array($value) ? implode(', ', $value) : (string) $value;
+    return nl2br(htmlspecialchars($str, ENT_QUOTES, 'UTF-8', false));
 }
 
 /**
@@ -1037,7 +1050,7 @@ function fmr_render_submission_card(array $submission, bool $show_form_badge, ar
     $html .= '<table class="table table-sm mb-2">';
     foreach ($data as $key => $value) {
         $label = $field_labels[$key] ?? $key;
-        $html .= '<tr><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.htmlspecialchars(is_array($value) ? implode(', ', $value) : (string) $value).'</td></tr>';
+        $html .= '<tr><td class="fw-bold" style="width:30%">'.htmlspecialchars($label).'</td><td>'.fmr_format_value_html($value).'</td></tr>';
     }
     foreach ($meta as $key => $value) {
         if ($key === 'consent_log') {
